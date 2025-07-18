@@ -1,55 +1,76 @@
 .PHONY: all build check test fmt lint clean dev release
 
-# デフォルトタスク
+# Default task
 all: fmt lint test
 
-# ビルド
+# Build
 build:
 	cargo build
 
-# チェック（高速）
+# Check (fast)
 check:
 	cargo check
 
-# テスト実行
+# Run tests
 test:
 	cargo test
 
-# フォーマット
+# Format
 fmt:
 	cargo fmt
 	cargo clippy --fix --allow-dirty
 	cargo clippy -- -D warnings
 	cargo fmt
 
-# リント（よく使うやつ！）
+# Lint (frequently used!)
 lint: fmt
 
-# クリーン
+# Clean
 clean:
 	cargo clean
 
-# 開発用（フォーマット → リント → ビルド）
+# Development (format -> lint -> build)
 dev: fmt
 	cargo clippy --allow-dirty && cargo build
 
-# リリースビルド
+# Release build
 release:
 	cargo build --release
 
-# すべてのチェック（CI用）
+# All checks (for CI)
 ci: fmt
 	cargo clippy -- -D warnings
 	cargo test
 
-# ドキュメント生成
+# Generate documentation
 doc:
 	cargo doc --open
 
-# 依存関係の更新
+# Update dependencies
 update:
 	cargo update
 
-# 監視モード（cargo-watchが必要）
+# Watch mode (requires cargo-watch)
 watch:
 	cargo watch -x check -x test -x clippy
+
+# ========== Python Evaluation Suite ==========
+
+# Setup evaluation environment
+eval-setup:
+	cd evaluation && poetry install
+
+# Run evaluation tests
+eval-test:
+	cd evaluation && poetry run pytest -v
+
+# Format evaluation code
+eval-fmt:
+	cd evaluation && poetry run black . && poetry run isort .
+
+# Quick evaluation test
+eval-quick:
+	cd evaluation && poetry run pytest -v -k "Hello"
+
+# All evaluation tasks
+eval: eval-fmt eval-test

@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "llm-evaluation-suite"
+version = "0.1.0"
+description = "Evaluation suite for the Kairei Rust Transformer"
+authors = ["Yutaka Nishimura <ytk.nishimura@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+deepeval = "^3.3.0"
+pytest = "^8.2.2"
+python-dotenv = "^1.0.1"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0.0"
+isort = "^5.13.0"
+flake8 = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py39']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 88
