@@ -2,9 +2,11 @@
 
 mod error;
 mod model;
+mod processor;
 
 pub use error::CandleError;
 pub use model::{CandleModel, ModelConfig};
+pub use processor::{CandleProcessor, CandleProcessorBuilder};
 
 /// Initialize the candle backend
 pub fn init() {

@@ -9,5 +9,11 @@ description = "Main crate for Kairei-v2 AgentCulture Framework"
 
 [dependencies]
 kairei-core = { workspace = true }
+kairei-candle = { path = "../kairei-candle", optional = true }
+async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
+
+[features]
+default = []
+candle = ["dep:kairei-candle"]

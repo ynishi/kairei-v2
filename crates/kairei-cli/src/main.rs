@@ -66,35 +66,47 @@ async fn run_chat(
     once: bool,
     use_candle: bool,
 ) -> Result<(), CliError> {
+    use kairei::prelude::*;
+
     // Only show header in interactive mode
     if !once {
         println!("🤖 Kairei Chat - Type 'exit' to quit");
         println!("================================");
     }
 
-    // Initialize the kernel
-    let mut kernel = kairei_core::KaireiKernel::new();
-
-    // Initialize candle if requested
-    #[cfg(feature = "candle")]
-    if use_candle {
+    // Build the application
+    let app = if use_candle {
         println!("🔥 Initializing Candle backend...");
-        let config = kairei_candle::ModelConfig::default();
-        kernel
-            .init_candle(config)
+        let processor = kairei::CandleProcessorBuilder::new("kairei-chat")
+            .temperature(0.7)
+            .max_tokens(512)
+            .build()
             .await
             .map_err(|e| CliError::Core(e.to_string()))?;
         println!("✅ Candle backend ready!");
-    }
+
+        KaireiApp::builder("kairei-chat")
+            .llm_mode()
+            .processor(processor)
+            .build()
+            .map_err(CliError::Core)?
+    } else {
+        // Use echo processor as fallback
+        KaireiApp::builder("kairei-chat")
+            .llm_mode()
+            .processor(kairei::app::processors::EchoProcessor)
+            .build()
+            .map_err(CliError::Core)?
+    };
 
     // If initial message provided, process it
     if let Some(msg) = initial_message {
         if !once {
             println!("You: {}", msg);
         }
-        let request = kairei_core::Request::simple(msg);
-        let response = kernel
-            .process_request(request)
+        let request = Request::simple(msg);
+        let response = app
+            .process(request)
             .await
             .map_err(|e| CliError::Core(e.to_string()))?;
 
@@ -133,10 +145,10 @@ async fn run_chat(
                 // Add to history
                 rl.add_history_entry(&line).ok();
 
-                // Process through core
-                let request = kairei_core::Request::simple(input);
-                let response = kernel
-                    .process_request(request)
+                // Process through app
+                let request = Request::simple(input);
+                let response = app
+                    .process(request)
                     .await
                     .map_err(|e| CliError::Core(e.to_string()))?;
                 println!("Bot: {}", response.message);

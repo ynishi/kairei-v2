@@ -8,7 +8,9 @@ repository.workspace = true
 description = "Candle integration for Kairei-v2 AgentCulture Framework"
 
 [dependencies]
+async-trait = "0.1"
 candle-core = "0.9"
 candle-nn = "0.9"
+kairei-core = { path = "../kairei-core" }
 thiserror = "1"
 tokio = { version = "1", features = ["full"] }

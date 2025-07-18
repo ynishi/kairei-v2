@@ -3,14 +3,12 @@
 //! Internal engine implementation for the Kairei-v2 AgentCulture Framework.
 
 pub mod error;
-pub mod kernel;
+pub mod processor;
 pub mod request;
-pub mod types;
 
 pub use error::{CoreError, Result};
-pub use kernel::*;
-pub use request::{Request, RequestMetadata, Response, ResponseMetadata};
-pub use types::{RequestId, SessionId};
+pub use processor::{ProcessingContext, Processor, ProcessorExt, ProcessorMetadata};
+pub use request::{Request, RequestId, RequestMetadata, Response, ResponseMetadata};
 
 #[cfg(test)]
 mod tests {
