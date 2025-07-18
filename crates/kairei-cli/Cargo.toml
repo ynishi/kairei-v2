@@ -1,0 +1,14 @@
+[package]
+name = "kairei-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "CLI for Kairei-v2 AgentCulture Framework"
+
+[dependencies]
+kairei-core = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"

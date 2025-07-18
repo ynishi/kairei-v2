@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kairei-core",
+    "crates/kairei-*",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Yutaka Nishimura <ytk.nishimura@gmail.com>"]
+repository = "https://github.com/ynishi/kairei-v2"
+description = "AgentCulture Framework"
+
+[workspace.dependencies]
+kairei-core = { path = "crates/kairei-core" }

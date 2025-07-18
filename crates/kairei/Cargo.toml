@@ -1,0 +1,13 @@
+[package]
+name = "kairei"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Main crate for Kairei-v2 AgentCulture Framework"
+
+[dependencies]
+kairei-core = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
