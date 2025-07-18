@@ -6,10 +6,10 @@ use thiserror::Error;
 pub enum CoreError {
     #[error("Processing error: {0}")]
     Processing(String),
-    
+
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
-    
+
     #[error("Candle error: {0}")]
     Candle(String),
 }

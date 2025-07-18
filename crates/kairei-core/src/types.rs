@@ -12,12 +12,12 @@ impl RequestId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
-    
+
     /// Create from existing string
     pub fn from_string(s: impl Into<String>) -> Self {
         Self(s.into())
     }
-    
+
     /// Get the inner string
     pub fn as_str(&self) -> &str {
         &self.0
@@ -45,12 +45,12 @@ impl SessionId {
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
-    
+
     /// Create from existing string
     pub fn from_string(s: impl Into<String>) -> Self {
         Self(s.into())
     }
-    
+
     /// Get the inner string
     pub fn as_str(&self) -> &str {
         &self.0
