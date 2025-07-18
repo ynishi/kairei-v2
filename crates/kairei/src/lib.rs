@@ -16,7 +16,7 @@ pub use app::{AppMetadata, AppMode, KaireiApp, KaireiAppBuilder};
 
 // Feature-gated re-exports
 #[cfg(feature = "candle")]
-pub use kairei_candle::{CandleProcessor, CandleProcessorBuilder};
+pub use kairei_candle::{CandleProcessor, CandleProcessorBuilder, Llama2CProcessor};
 
 /// Prelude module for convenient imports
 pub mod prelude {

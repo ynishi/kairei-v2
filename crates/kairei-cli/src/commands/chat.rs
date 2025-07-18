@@ -1,73 +1,14 @@
-//! CLI for Kairei-v2 AgentCulture Framework
+//! Chat command handler
 
-mod error;
-
-use clap::Parser;
-use error::CliError;
+use crate::error::CliError;
+use kairei::prelude::*;
 use rustyline::DefaultEditor;
 
-#[derive(Parser)]
-#[command(name = "kairei")]
-#[command(about = "CLI for Kairei-v2 AgentCulture Framework", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(clap::Subcommand)]
-enum Commands {
-    /// Initialize a new Kairei project
-    Init,
-    /// Run the Kairei agent
-    Run,
-    /// Chat with the Kairei agent
-    Chat {
-        /// Optional initial message
-        #[arg(long, short)]
-        message: Option<String>,
-        /// Run once and exit (non-interactive mode)
-        #[arg(long)]
-        once: bool,
-        /// Use candle backend
-        #[arg(long)]
-        candle: bool,
-    },
-}
-
-#[tokio::main]
-async fn main() -> Result<(), CliError> {
-    let cli = Cli::parse();
-
-    match &cli.command {
-        Some(Commands::Init) => {
-            println!("Initializing Kairei project...");
-        }
-        Some(Commands::Run) => {
-            println!("Running Kairei agent...");
-        }
-        Some(Commands::Chat {
-            message,
-            once,
-            candle,
-        }) => {
-            run_chat(message.clone(), *once, *candle).await?;
-        }
-        None => {
-            println!("Kairei-v2 AgentCulture Framework");
-            println!("Use --help for more information");
-        }
-    }
-
-    Ok(())
-}
-
-async fn run_chat(
+pub async fn run_chat(
     initial_message: Option<String>,
     once: bool,
     use_candle: bool,
 ) -> Result<(), CliError> {
-    use kairei::prelude::*;
-
     // Only show header in interactive mode
     if !once {
         println!("🤖 Kairei Chat - Type 'exit' to quit");
@@ -76,14 +17,10 @@ async fn run_chat(
 
     // Build the application
     let app = if use_candle {
-        println!("🔥 Initializing Candle backend...");
-        let processor = kairei::CandleProcessorBuilder::new("kairei-chat")
-            .temperature(0.7)
-            .max_tokens(512)
-            .build()
-            .await
-            .map_err(|e| CliError::Core(e.to_string()))?;
-        println!("✅ Candle backend ready!");
+        println!("🔥 Initializing Candle backend (LLaMA2-C)...");
+        let processor =
+            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?;
+        println!("✅ LLaMA2-C backend ready!");
 
         KaireiApp::builder("kairei-chat")
             .llm_mode()

@@ -11,6 +11,12 @@ description = "Candle integration for Kairei-v2 AgentCulture Framework"
 async-trait = "0.1"
 candle-core = "0.9"
 candle-nn = "0.9"
+candle-transformers = "0.9"
+hf-hub = { version = "0.3", features = ["tokio"] }
 kairei-core = { path = "../kairei-core" }
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "1"
+tokenizers = { version = "0.20", default-features = false, features = ["unstable_wasm"] }
 tokio = { version = "1", features = ["full"] }
