@@ -11,4 +11,4 @@ description = "CLI for Kairei-v2 AgentCulture Framework"
 kairei-core = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
-anyhow = "1"
+thiserror = "1"

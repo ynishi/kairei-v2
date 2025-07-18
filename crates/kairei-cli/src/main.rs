@@ -1,6 +1,9 @@
 //! CLI for Kairei-v2 AgentCulture Framework
 
+mod error;
+
 use clap::Parser;
+use error::CliError;
 
 #[derive(Parser)]
 #[command(name = "kairei")]
