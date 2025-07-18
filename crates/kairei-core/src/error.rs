@@ -10,8 +10,8 @@ pub enum CoreError {
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
-    #[error("Candle error: {0}")]
-    Candle(String),
+    #[error("Backend error: {0}")]
+    Backend(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

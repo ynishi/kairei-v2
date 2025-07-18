@@ -13,3 +13,10 @@ clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
 rustyline = "14"
+
+# Re-export candle feature
+kairei-candle = { path = "../kairei-candle", optional = true }
+
+[features]
+default = ["candle"]
+candle = ["kairei-core/candle", "dep:kairei-candle"]

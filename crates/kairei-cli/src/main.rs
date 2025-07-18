@@ -28,6 +28,9 @@ enum Commands {
         /// Run once and exit (non-interactive mode)
         #[arg(long)]
         once: bool,
+        /// Use candle backend
+        #[arg(long)]
+        candle: bool,
     },
 }
 
@@ -42,8 +45,12 @@ async fn main() -> Result<(), CliError> {
         Some(Commands::Run) => {
             println!("Running Kairei agent...");
         }
-        Some(Commands::Chat { message, once }) => {
-            run_chat(message.clone(), *once).await?;
+        Some(Commands::Chat {
+            message,
+            once,
+            candle,
+        }) => {
+            run_chat(message.clone(), *once, *candle).await?;
         }
         None => {
             println!("Kairei-v2 AgentCulture Framework");
@@ -54,7 +61,11 @@ async fn main() -> Result<(), CliError> {
     Ok(())
 }
 
-async fn run_chat(initial_message: Option<String>, once: bool) -> Result<(), CliError> {
+async fn run_chat(
+    initial_message: Option<String>,
+    once: bool,
+    use_candle: bool,
+) -> Result<(), CliError> {
     // Only show header in interactive mode
     if !once {
         println!("🤖 Kairei Chat - Type 'exit' to quit");
@@ -62,7 +73,19 @@ async fn run_chat(initial_message: Option<String>, once: bool) -> Result<(), Cli
     }
 
     // Initialize the kernel
-    let kernel = kairei_core::KaireiKernel::new();
+    let mut kernel = kairei_core::KaireiKernel::new();
+
+    // Initialize candle if requested
+    #[cfg(feature = "candle")]
+    if use_candle {
+        println!("🔥 Initializing Candle backend...");
+        let config = kairei_candle::ModelConfig::default();
+        kernel
+            .init_candle(config)
+            .await
+            .map_err(|e| CliError::Core(e.to_string()))?;
+        println!("✅ Candle backend ready!");
+    }
 
     // If initial message provided, process it
     if let Some(msg) = initial_message {
