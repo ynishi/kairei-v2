@@ -4,6 +4,7 @@ mod error;
 
 use clap::Parser;
 use error::CliError;
+use rustyline::DefaultEditor;
 
 #[derive(Parser)]
 #[command(name = "kairei")]
@@ -89,31 +90,46 @@ async fn run_chat(initial_message: Option<String>, once: bool) -> Result<(), Cli
     }
 
     // Interactive loop (only if not in once mode)
+    let mut rl = DefaultEditor::new()?;
+
     loop {
-        print!("> ");
-        use std::io::{self, Write};
-        io::stdout().flush()?;
+        let readline = rl.readline("🤖 > ");
+        match readline {
+            Ok(line) => {
+                let input = line.trim();
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
+                if input == "exit" || input == "quit" {
+                    println!("Goodbye! 👋");
+                    break;
+                }
 
-        if input == "exit" || input == "quit" {
-            println!("Goodbye! 👋");
-            break;
+                if input.is_empty() {
+                    continue;
+                }
+
+                // Add to history
+                rl.add_history_entry(&line).ok();
+
+                // Process through core
+                let request = kairei_core::Request::simple(input);
+                let response = kernel
+                    .process_request(request)
+                    .await
+                    .map_err(|e| CliError::Core(e.to_string()))?;
+                println!("Bot: {}", response.message);
+            }
+            Err(rustyline::error::ReadlineError::Interrupted) => {
+                println!("\nCtrl-C received. Use 'exit' to quit.");
+                continue;
+            }
+            Err(rustyline::error::ReadlineError::Eof) => {
+                println!("\nGoodbye! 👋");
+                break;
+            }
+            Err(err) => {
+                return Err(err.into());
+            }
         }
-
-        if input.is_empty() {
-            continue;
-        }
-
-        // Process through core
-        let request = kairei_core::Request::simple(input);
-        let response = kernel
-            .process_request(request)
-            .await
-            .map_err(|e| CliError::Core(e.to_string()))?;
-        println!("Bot: {}", response.message);
     }
 
     Ok(())

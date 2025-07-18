@@ -12,4 +12,7 @@ pub enum CliError {
 
     #[error("Invalid input: {0}")]
     InvalidInput(String),
+
+    #[error("Readline error: {0}")]
+    Readline(#[from] rustyline::error::ReadlineError),
 }
