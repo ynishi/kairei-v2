@@ -4,7 +4,6 @@
 //! abstractions for building LLM applications and agents.
 
 pub mod app;
-pub mod lora;
 
 // Re-export core types
 pub use kairei_core::{
@@ -15,18 +14,12 @@ pub use kairei_core::{
 // Re-export app types
 pub use app::{AppMetadata, AppMode, KaireiApp, KaireiAppBuilder};
 
-// Re-export lora types
-pub use lora::{TrainingConfig, train_lora};
-
 // Feature-gated re-exports
 #[cfg(feature = "candle")]
-pub use kairei_candle::{CandleProcessor, CandleProcessorBuilder, Llama2CProcessor};
+pub use kairei_candle::Llama2CProcessor;
 
 /// Prelude module for convenient imports
 pub mod prelude {
     pub use crate::app::{AppMode, KaireiApp};
     pub use kairei_core::{Processor, Request, Response};
-
-    #[cfg(feature = "candle")]
-    pub use kairei_candle::CandleProcessorBuilder;
 }

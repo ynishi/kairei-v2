@@ -1,16 +1,13 @@
 //! Candle integration for Kairei-v2 AgentCulture Framework
 
 mod error;
-mod llama2c;
+mod llama2c_processor;
 mod model;
-mod processor;
-mod train;
+mod models;
 
 pub use error::CandleError;
-pub use llama2c::Llama2CProcessor;
+pub use llama2c_processor::Llama2CProcessor;
 pub use model::{CandleModel, ModelConfig};
-pub use processor::{CandleProcessor, CandleProcessorBuilder};
-pub use train::{TrainingConfig, train_lora};
 
 /// Initialize the candle backend
 pub fn init() {

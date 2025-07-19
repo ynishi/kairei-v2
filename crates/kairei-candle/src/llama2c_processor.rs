@@ -1,11 +1,11 @@
 //! Simple LLaMA2-C based processor
 
+use crate::models::llama2c::{Cache, Llama, TransformerWeights};
 use async_trait::async_trait;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
-use candle_transformers::models::llama2_c::{self, Config};
-use candle_transformers::models::llama2_c_weights::TransformerWeights;
+use candle_transformers::models::llama2_c::Config;
 use kairei_core::{Processor, ProcessorMetadata, Request, Response, Result as CoreResult};
 use std::sync::RwLock;
 use tokenizers::Tokenizer;
@@ -14,10 +14,10 @@ use crate::CandleError;
 
 /// LLaMA2-C based processor
 pub struct Llama2CProcessor {
-    model: llama2_c::Llama,
+    model: Llama,
     #[allow(dead_code)]
-    config: llama2_c::Config,
-    cache: RwLock<llama2_c::Cache>, // RwLock for thread-safe interior mutability
+    config: Config,
+    cache: RwLock<Cache>, // RwLock for thread-safe interior mutability
     device: Device,
     tokenizer: Tokenizer,
     logits_processor: RwLock<LogitsProcessor>,
@@ -73,10 +73,10 @@ impl Llama2CProcessor {
             .map_err(|e| CandleError::Other(format!("Failed to create var builder: {}", e)))?;
 
         // Create cache
-        let cache = llama2_c::Cache::new(true, &config, vb.pp("rot"))?;
+        let cache = Cache::new(true, &config, vb.pp("rot"))?;
 
         // Load model
-        let model = llama2_c::Llama::load(vb, config.clone())?;
+        let model = Llama::load(vb, config.clone())?;
 
         // Initialize generation parameters
         let seed = 299792458;
@@ -106,17 +106,17 @@ impl Llama2CProcessor {
     /// Create with a specific tokenizer
     pub fn new_with_tokenizer(tokenizer: Tokenizer) -> Result<Self, CandleError> {
         // Use tiny config for testing
-        let config = llama2_c::Config::tiny_15m();
+        let config = Config::tiny_15m();
         let device = Device::Cpu;
 
         // Create a simple VarBuilder with zeros for testing
         let vb = VarBuilder::zeros(DType::F32, &device);
 
         // Create cache
-        let cache = llama2_c::Cache::new(true, &config, vb.pp("rot"))?;
+        let cache = Cache::new(true, &config, vb.pp("rot"))?;
 
         // Load model
-        let model = llama2_c::Llama::load(vb, config.clone())?;
+        let model = Llama::load(vb, config.clone())?;
 
         // Initialize generation parameters
         let seed = 299792458; // Speed of light for fun
@@ -172,6 +172,9 @@ impl Llama2CProcessor {
 #[async_trait]
 impl Processor for Llama2CProcessor {
     async fn process(&self, request: Request) -> CoreResult<Response> {
+        println!("\n🚀 Llama2CProcessor.process called!");
+        println!("  Input message: {}", request.message);
+
         // Tokenize the input
         let encoding = self
             .tokenizer
@@ -179,6 +182,12 @@ impl Processor for Llama2CProcessor {
             .map_err(|e| CandleError::Other(e.to_string()))?;
 
         let mut tokens = encoding.get_ids().to_vec();
+        println!(
+            "  Tokenized to {} tokens: {:?}",
+            tokens.len(),
+            &tokens[..tokens.len().min(10)]
+        );
+
         if tokens.is_empty() {
             return Ok(Response::simple(
                 request.id,
@@ -188,6 +197,7 @@ impl Processor for Llama2CProcessor {
 
         // Generate tokens
         let max_new_tokens = 50; // Generate up to 50 new tokens
+        println!("  Generating up to {} new tokens...", max_new_tokens);
         let mut generated_tokens = Vec::new();
         let mut index_pos = 0;
 
