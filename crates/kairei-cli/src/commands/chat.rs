@@ -3,6 +3,22 @@
 use crate::error::CliError;
 use kairei::prelude::*;
 use rustyline::DefaultEditor;
+use std::path::{Path, PathBuf};
+
+/// Resolve LoRA model path from name
+fn resolve_lora_path(lora_name: &str) -> Result<PathBuf, CliError> {
+    let lora_dir = Path::new("loras").join(lora_name);
+    let lora_file = lora_dir.join("adapter.safetensors");
+
+    if !lora_file.exists() {
+        return Err(CliError::InvalidInput(format!(
+            "LoRA model '{}' not found. Use 'kairei lora list' to see available models.",
+            lora_name
+        )));
+    }
+
+    Ok(lora_file)
+}
 
 pub async fn run_chat(
     initial_message: Option<String>,
@@ -17,19 +33,44 @@ pub async fn run_chat(
         println!("================================");
     }
 
-    // Show LoRA configuration if any
-    if !lora_models.is_empty() {
-        println!("📚 Loading LoRA models: {:?}", lora_models);
+    // Resolve LoRA paths
+    let lora_paths: Vec<PathBuf> = if !lora_models.is_empty() {
+        println!("📚 Resolving LoRA models...");
+        let mut paths = Vec::new();
+        for lora_name in &lora_models {
+            match resolve_lora_path(lora_name) {
+                Ok(path) => {
+                    println!("   ✅ Found: {} -> {}", lora_name, path.display());
+                    paths.push(path);
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
         if let Some(ref model) = base_model {
             println!("🧠 Base model: {}", model);
         }
-    }
+        paths
+    } else {
+        Vec::new()
+    };
 
     // Build the application
     let app = if use_candle {
         println!("🔥 Initializing Candle backend (LLaMA2-C)...");
-        let processor =
-            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?;
+
+        // Create processor with LoRA if specified
+        let processor = if !lora_paths.is_empty() {
+            println!("🔧 Applying LoRA adapters...");
+            // TODO: Create processor with LoRA support
+            // For now, we'll create the standard processor and warn
+            println!("⚠️  LoRA support is not yet implemented in Candle backend");
+            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?
+        } else {
+            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?
+        };
+
         println!("✅ LLaMA2-C backend ready!");
 
         KaireiApp::builder("kairei-chat")

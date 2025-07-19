@@ -21,6 +21,10 @@ fmt:
 	cargo clippy --fix --allow-dirty
 	cargo clippy -- -D warnings
 	cargo fmt
+	@if [ -d "training" ]; then \
+		echo "Formatting training directory..."; \
+		cd training && poetry run black . && poetry run ruff check --fix . || true; \
+	fi
 
 # Lint (frequently used!)
 lint: fmt
