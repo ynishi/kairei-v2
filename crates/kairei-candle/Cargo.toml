@@ -12,6 +12,8 @@ async-trait = "0.1"
 candle-core = "0.9"
 candle-nn = "0.9"
 candle-transformers = "0.9"
+candle-lora = { git = "https://github.com/ynishi/candle-lora.git" }
+candle-lora-macro = { git = "https://github.com/ynishi/candle-lora.git" }
 hf-hub = { version = "0.3", features = ["tokio"] }
 kairei-core = { path = "../kairei-core" }
 rand = "0.8"

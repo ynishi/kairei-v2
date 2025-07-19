@@ -20,6 +20,11 @@ debug/
 /examples/output/
 /temp/
 
+# LoRA development
+/loras/
+/lora_datasets/
+/base_models/
+
 # Development & IDEs
 .env
 .env.local

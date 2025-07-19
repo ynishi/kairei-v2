@@ -11,6 +11,11 @@ struct Cli {
     command: Option<Commands>,
 }
 
+#[derive(clap::ValueEnum, Clone)]
+enum SetupComponent {
+    Lora,
+}
+
 #[derive(clap::Subcommand)]
 enum Commands {
     /// Initialize a new Kairei project
@@ -40,6 +45,14 @@ enum Commands {
         /// Force re-download even if file exists
         #[arg(long, short)]
         force: bool,
+        /// Setup component type
+        component: Option<SetupComponent>,
+    },
+    /// LoRA culture management commands
+    #[command(name = "lora:new")]
+    LoraNew {
+        /// Culture name
+        culture_name: String,
     },
 }
 
@@ -61,8 +74,22 @@ async fn main() -> Result<(), CliError> {
         }) => {
             commands::run_chat(message.clone(), *once, *candle).await?;
         }
-        Some(Commands::Setup { list, model, force }) => {
-            commands::run_setup(*list, model.clone(), *force).await?;
+        Some(Commands::Setup {
+            list,
+            model,
+            force,
+            component,
+        }) => {
+            if let Some(comp) = component {
+                match comp {
+                    SetupComponent::Lora => commands::setup_lora().await?,
+                }
+            } else {
+                commands::run_setup(*list, model.clone(), *force).await?;
+            }
+        }
+        Some(Commands::LoraNew { culture_name }) => {
+            commands::lora_new(culture_name).await?;
         }
         None => {
             println!("Kairei-v2 AgentCulture Framework");
