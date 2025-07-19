@@ -1,41 +1,18 @@
 use crate::error::CliError;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
-struct LoraConfig {
-    culture: CultureConfig,
-    model: ModelConfig,
-    training: TrainingConfig,
-    lora: LoraSpecificConfig,
-}
-
-#[derive(Debug, Deserialize)]
-struct CultureConfig {
+// LoRA metadata stored as meta.toml in each LoRA directory
+#[derive(Debug, Serialize, Deserialize)]
+struct LoraMetadata {
     name: String,
-    description: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ModelConfig {
-    base_model: String,
-    model_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct TrainingConfig {
-    epochs: usize,
-    batch_size: usize,
-    learning_rate: f64,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoraSpecificConfig {
-    rank: usize,
-    alpha: f64,
-    dropout: f32,
-    target_modules: Vec<String>,
+    base_model: Option<String>,
+    description: Option<String>,
+    created_at: Option<String>,
+    // LoRA specific params
+    rank: Option<usize>,
+    alpha: Option<f64>,
 }
 
 pub async fn setup_lora() -> Result<(), CliError> {
@@ -63,79 +40,8 @@ pub async fn setup_lora() -> Result<(), CliError> {
     Ok(())
 }
 
-pub async fn lora_new(culture_name: &str) -> Result<(), CliError> {
-    println!("✨ Creating new LoRA culture: {}", culture_name);
-
-    // Check if loras directory exists
-    let loras_dir = Path::new("loras");
-    if !loras_dir.exists() {
-        return Err(CliError::InvalidInput(
-            "LoRA environment not initialized. Please run: kairei setup lora".to_string(),
-        ));
-    }
-
-    // Create culture directory
-    let culture_dir = loras_dir.join(culture_name);
-    if culture_dir.exists() {
-        return Err(CliError::InvalidInput(format!(
-            "Culture '{}' already exists",
-            culture_name
-        )));
-    }
-
-    fs::create_dir_all(&culture_dir).map_err(|e| {
-        CliError::InvalidInput(format!("Failed to create culture directory: {}", e))
-    })?;
-    println!("📁 Created loras/{}/", culture_name);
-
-    // Create dataset directory
-    let dataset_dir = culture_dir.join("dataset");
-    fs::create_dir_all(&dataset_dir).map_err(|e| {
-        CliError::InvalidInput(format!("Failed to create dataset directory: {}", e))
-    })?;
-    println!("📁 Created loras/{}/dataset/", culture_name);
-
-    // Create config.toml
-    let config_path = culture_dir.join("config.toml");
-    let config_content = format!(
-        r#"# LoRA Configuration for {}
-[culture]
-name = "{}"
-description = "LoRA culture for {}"
-
-[model]
-base_model = "stories15M"  # Available: stories15M, stories42M, stories110M
-model_path = "./base_models/stories15M.bin"
-
-[training]
-epochs = 5
-batch_size = 4
-learning_rate = 1e-4
-
-[lora]
-rank = 8
-alpha = 16
-dropout = 0.1
-target_modules = ["q_proj", "v_proj"]  # Which layers to apply LoRA to
-"#,
-        culture_name, culture_name, culture_name
-    );
-
-    fs::write(&config_path, config_content)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to create config.toml: {}", e)))?;
-    println!("📝 Created loras/{}/config.toml", culture_name);
-
-    println!("\n✅ Culture '{}' created successfully!", culture_name);
-    println!("\nNext steps:");
-    println!("1. Add training data to: loras/{}/dataset/", culture_name);
-    println!("2. Edit configuration: loras/{}/config.toml", culture_name);
-    println!("3. Train the model: kairei lora:train {}", culture_name);
-
-    Ok(())
-}
-
 pub async fn lora_list() -> Result<(), CliError> {
-    println!("📋 Listing all LoRA cultures...\n");
+    println!("📋 Listing all registered LoRA models...\n");
 
     let loras_dir = Path::new("loras");
     if !loras_dir.exists() {
@@ -143,7 +49,7 @@ pub async fn lora_list() -> Result<(), CliError> {
         return Ok(());
     }
 
-    let mut cultures = Vec::new();
+    let mut lora_list = Vec::new();
 
     // Read all directories in loras/
     let entries = fs::read_dir(loras_dir)
@@ -156,45 +62,51 @@ pub async fn lora_list() -> Result<(), CliError> {
 
         let path = entry.path();
         if path.is_dir() {
-            if let Some(culture_name) = path.file_name() {
-                if let Some(culture_name_str) = culture_name.to_str() {
-                    // Check if config.toml exists (to verify it's a valid culture)
-                    let config_path = path.join("config.toml");
-                    let has_config = config_path.exists();
+            // Try to read meta.toml
+            let meta_path = path.join("meta.toml");
+            if meta_path.exists() {
+                match fs::read_to_string(&meta_path) {
+                    Ok(content) => {
+                        match toml::from_str::<LoraMetadata>(&content) {
+                            Ok(metadata) => {
+                                // Check if the actual LoRA file exists
+                                let lora_file = path.join("adapter.safetensors");
+                                let file_exists = lora_file.exists();
 
-                    // Check if dataset directory exists
-                    let dataset_path = path.join("dataset");
-                    let has_dataset = dataset_path.exists();
-
-                    // Count dataset files if directory exists
-                    let dataset_count = if has_dataset {
-                        fs::read_dir(&dataset_path)
-                            .map(|entries| entries.count())
-                            .unwrap_or(0)
-                    } else {
-                        0
-                    };
-
-                    cultures.push((culture_name_str.to_string(), has_config, dataset_count));
+                                lora_list.push((metadata, file_exists));
+                            }
+                            Err(_) => {
+                                // Invalid metadata, skip
+                                continue;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Can't read metadata, skip
+                        continue;
+                    }
                 }
             }
         }
     }
 
-    if cultures.is_empty() {
-        println!("No LoRA cultures found. Create one with: kairei lora:new <culture_name>");
+    if lora_list.is_empty() {
+        println!("No LoRA models found. Add one with: kairei lora add <source>");
     } else {
-        println!("Found {} culture(s):", cultures.len());
+        println!("Found {} LoRA model(s):", lora_list.len());
         println!("─────────────────────────────────────────");
 
-        for (name, has_config, dataset_count) in cultures {
-            println!("📂 {}", name);
-            if has_config {
-                println!("   ✅ config.toml");
-            } else {
-                println!("   ❌ config.toml (missing)");
+        for (metadata, file_exists) in lora_list {
+            println!("📦 {}", metadata.name);
+            if let Some(base_model) = &metadata.base_model {
+                println!("   🧠 Base: {}", base_model);
             }
-            println!("   📊 {} dataset file(s)", dataset_count);
+            if let Some(desc) = &metadata.description {
+                println!("   📝 {}", desc);
+            }
+            if !file_exists {
+                println!("   ⚠️  adapter.safetensors missing!");
+            }
             println!();
         }
     }
@@ -202,102 +114,192 @@ pub async fn lora_list() -> Result<(), CliError> {
     Ok(())
 }
 
-pub async fn lora_train(
-    culture_name: &str,
-    epochs: Option<usize>,
-    batch_size: Option<usize>,
-    learning_rate: Option<f64>,
-    lora_rank: Option<usize>,
-    lora_alpha: Option<f64>,
-    lora_dropout: Option<f32>,
+// Add a LoRA model to the registry
+pub async fn lora_add(
+    source: &str,
+    name: Option<String>,
+    base_model: Option<String>,
+    description: Option<String>,
 ) -> Result<(), CliError> {
-    println!("🚀 Training LoRA culture: {}", culture_name);
+    println!("📥 Adding LoRA model from: {}", source);
 
-    // Check if culture exists
-    let culture_dir = Path::new("loras").join(culture_name);
-    if !culture_dir.exists() {
+    // Ensure loras directory exists
+    let loras_dir = Path::new("loras");
+    if !loras_dir.exists() {
+        return Err(CliError::InvalidInput(
+            "LoRA environment not initialized. Please run: kairei setup lora".to_string(),
+        ));
+    }
+
+    // Determine the LoRA name
+    let lora_name = if let Some(n) = name {
+        n
+    } else {
+        // Extract name from source filename
+        Path::new(source)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                CliError::InvalidInput("Cannot determine LoRA name from source".to_string())
+            })?
+    };
+
+    // Create directory for this LoRA
+    let lora_dir = loras_dir.join(&lora_name);
+    if lora_dir.exists() {
         return Err(CliError::InvalidInput(format!(
-            "Culture '{}' does not exist. Create it with: kairei lora new {}",
-            culture_name, culture_name
+            "LoRA '{}' already exists",
+            lora_name
+        )));
+    }
+    fs::create_dir_all(&lora_dir)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to create LoRA directory: {}", e)))?;
+
+    // Copy the LoRA file
+    let source_path = Path::new(source);
+    if !source_path.exists() {
+        // Clean up directory on error
+        let _ = fs::remove_dir_all(&lora_dir);
+        return Err(CliError::InvalidInput(format!(
+            "Source file does not exist: {}",
+            source
         )));
     }
 
-    // Read config.toml
-    let config_path = culture_dir.join("config.toml");
-    let config_content = fs::read_to_string(&config_path)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to read config.toml: {}", e)))?;
+    let dest_path = lora_dir.join("adapter.safetensors");
+    fs::copy(source_path, &dest_path).map_err(|e| {
+        // Clean up directory on error
+        let _ = fs::remove_dir_all(&lora_dir);
+        CliError::InvalidInput(format!("Failed to copy LoRA file: {}", e))
+    })?;
 
-    let lora_config: LoraConfig = toml::from_str(&config_content)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to parse config.toml: {}", e)))?;
-
-    // Override config values with CLI arguments if provided
-    let final_epochs = epochs.unwrap_or(lora_config.training.epochs);
-    let final_batch_size = batch_size.unwrap_or(lora_config.training.batch_size);
-    let final_learning_rate = learning_rate.unwrap_or(lora_config.training.learning_rate);
-    let final_lora_rank = lora_rank.unwrap_or(lora_config.lora.rank);
-    let final_lora_alpha = lora_alpha.unwrap_or(lora_config.lora.alpha);
-    let final_lora_dropout = lora_dropout.or(Some(lora_config.lora.dropout));
-
-    println!("📋 Training configuration:");
-    println!("   Culture: {}", lora_config.culture.name);
-    println!("   Model: {}", lora_config.model.base_model);
-    println!(
-        "   Epochs: {}{}",
-        final_epochs,
-        if epochs.is_some() { " (from CLI)" } else { "" }
-    );
-    println!(
-        "   Batch size: {}{}",
-        final_batch_size,
-        if batch_size.is_some() {
-            " (from CLI)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "   Learning rate: {}{}",
-        final_learning_rate,
-        if learning_rate.is_some() {
-            " (from CLI)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "   LoRA rank: {}{}",
-        final_lora_rank,
-        if lora_rank.is_some() {
-            " (from CLI)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "   LoRA alpha: {}{}",
-        final_lora_alpha,
-        if lora_alpha.is_some() {
-            " (from CLI)"
-        } else {
-            ""
-        }
-    );
-
-    // Create training config with final values
-    let training_config = kairei::TrainingConfig {
-        culture_name: lora_config.culture.name,
-        epochs: final_epochs,
-        batch_size: final_batch_size,
-        learning_rate: final_learning_rate,
-        lora_rank: final_lora_rank,
-        lora_alpha: final_lora_alpha,
-        lora_dropout: final_lora_dropout,
+    // Create metadata
+    let metadata = LoraMetadata {
+        name: lora_name.clone(),
+        base_model,
+        description,
+        created_at: Some(chrono::Utc::now().to_rfc3339()),
+        rank: None,
+        alpha: None,
     };
 
-    // Call the training function through kairei
-    kairei::train_lora(training_config)
-        .map_err(|e| CliError::InvalidInput(format!("Training failed: {}", e)))?;
+    // Write metadata
+    let meta_path = lora_dir.join("meta.toml");
+    let meta_content = toml::to_string_pretty(&metadata)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
+    fs::write(&meta_path, meta_content).map_err(|e| {
+        // Clean up directory on error
+        let _ = fs::remove_dir_all(&lora_dir);
+        CliError::InvalidInput(format!("Failed to write metadata: {}", e))
+    })?;
 
-    println!("✅ Training completed!");
+    println!("✅ LoRA '{}' added successfully!", lora_name);
+    println!("   📁 Location: {}", lora_dir.display());
+
+    Ok(())
+}
+
+// Show information about a specific LoRA
+pub async fn lora_show(name: &str) -> Result<(), CliError> {
+    let lora_dir = Path::new("loras").join(name);
+    if !lora_dir.exists() {
+        return Err(CliError::InvalidInput(format!("LoRA '{}' not found", name)));
+    }
+
+    // Read metadata
+    let meta_path = lora_dir.join("meta.toml");
+    if !meta_path.exists() {
+        return Err(CliError::InvalidInput(format!(
+            "Metadata not found for LoRA '{}'",
+            name
+        )));
+    }
+
+    let meta_content = fs::read_to_string(&meta_path)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to read metadata: {}", e)))?;
+    let metadata: LoraMetadata = toml::from_str(&meta_content)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to parse metadata: {}", e)))?;
+
+    // Check if LoRA file exists
+    let lora_file = lora_dir.join("adapter.safetensors");
+    let file_exists = lora_file.exists();
+    let file_size = if file_exists {
+        fs::metadata(&lora_file).ok().map(|m| m.len())
+    } else {
+        None
+    };
+
+    // Display information
+    println!("📦 LoRA: {}", metadata.name);
+    println!("─────────────────────────────────────────");
+
+    if let Some(base_model) = &metadata.base_model {
+        println!("🧠 Base Model: {}", base_model);
+    }
+
+    if let Some(desc) = &metadata.description {
+        println!("📝 Description: {}", desc);
+    }
+
+    if let Some(created) = &metadata.created_at {
+        println!("📅 Created: {}", created);
+    }
+
+    if let Some(rank) = metadata.rank {
+        println!("🔢 Rank: {}", rank);
+    }
+
+    if let Some(alpha) = metadata.alpha {
+        println!("🔢 Alpha: {}", alpha);
+    }
+
+    println!("📁 Location: {}", lora_dir.display());
+
+    if file_exists {
+        if let Some(size) = file_size {
+            let size_mb = size as f64 / 1_048_576.0;
+            println!("💾 File Size: {:.2} MB", size_mb);
+        }
+    } else {
+        println!("⚠️  LoRA file (adapter.safetensors) is missing!");
+    }
+
+    Ok(())
+}
+
+// Remove a LoRA from the registry
+pub async fn lora_remove(name: &str, keep_file: bool) -> Result<(), CliError> {
+    let lora_dir = Path::new("loras").join(name);
+    if !lora_dir.exists() {
+        return Err(CliError::InvalidInput(format!("LoRA '{}' not found", name)));
+    }
+
+    if keep_file {
+        println!("📁 Keeping the LoRA files...");
+
+        // Just remove the metadata to "unregister" it
+        let meta_path = lora_dir.join("meta.toml");
+        if meta_path.exists() {
+            fs::remove_file(&meta_path)
+                .map_err(|e| CliError::InvalidInput(format!("Failed to remove metadata: {}", e)))?;
+        }
+
+        println!(
+            "✅ LoRA '{}' unregistered (files kept in {})",
+            name,
+            lora_dir.display()
+        );
+    } else {
+        println!("🗑️  Removing LoRA '{}' and all its files...", name);
+
+        // Remove the entire directory
+        fs::remove_dir_all(&lora_dir).map_err(|e| {
+            CliError::InvalidInput(format!("Failed to remove LoRA directory: {}", e))
+        })?;
+
+        println!("✅ LoRA '{}' removed completely", name);
+    }
+
     Ok(())
 }

@@ -8,11 +8,21 @@ pub async fn run_chat(
     initial_message: Option<String>,
     once: bool,
     use_candle: bool,
+    lora_models: Vec<String>,
+    base_model: Option<String>,
 ) -> Result<(), CliError> {
     // Only show header in interactive mode
     if !once {
         println!("🤖 Kairei Chat - Type 'exit' to quit");
         println!("================================");
+    }
+
+    // Show LoRA configuration if any
+    if !lora_models.is_empty() {
+        println!("📚 Loading LoRA models: {:?}", lora_models);
+        if let Some(ref model) = base_model {
+            println!("🧠 Base model: {}", model);
+        }
     }
 
     // Build the application

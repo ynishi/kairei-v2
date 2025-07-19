@@ -11,53 +11,43 @@ struct Cli {
     command: Option<Commands>,
 }
 
-#[derive(clap::ValueEnum, Clone)]
-enum SetupComponent {
-    Lora,
-}
-
 #[derive(clap::Subcommand)]
 enum LoraCommands {
-    /// Create a new LoRA culture
-    New {
-        /// Culture name
-        culture_name: String,
+    /// Add a LoRA model to the registry
+    Add {
+        /// Source (file path or URL)
+        source: String,
+
+        /// LoRA name (defaults to filename)
+        #[arg(long, short = 'n')]
+        name: Option<String>,
+
+        /// Base model this LoRA is for
+        #[arg(long, short = 'b', default_value = "stories15M")]
+        base_model: Option<String>,
+
+        /// Description
+        #[arg(long, short = 'd')]
+        description: Option<String>,
     },
-    /// List all LoRA cultures
+
+    /// List all registered LoRA models
     List,
-    /// Train a LoRA culture
-    Train {
-        /// Culture name
-        culture_name: String,
 
-        /// Number of epochs (overrides config.toml)
-        #[arg(long, short = 'e')]
-        epochs: Option<usize>,
-
-        /// Batch size (overrides config.toml)
-        #[arg(long, short = 'b')]
-        batch_size: Option<usize>,
-
-        /// Learning rate (overrides config.toml)
-        #[arg(long, short = 'l')]
-        learning_rate: Option<f64>,
-
-        /// LoRA rank (overrides config.toml)
-        #[arg(long)]
-        lora_rank: Option<usize>,
-
-        /// LoRA alpha (overrides config.toml)
-        #[arg(long)]
-        lora_alpha: Option<f64>,
-
-        /// LoRA dropout (overrides config.toml)
-        #[arg(long)]
-        lora_dropout: Option<f32>,
+    /// Show information about a LoRA model
+    Show {
+        /// LoRA name
+        name: String,
     },
-    /// Apply a LoRA culture
-    Apply {
-        /// Culture name
-        culture_name: String,
+
+    /// Remove a LoRA model from the registry
+    Remove {
+        /// LoRA name
+        name: String,
+
+        /// Keep the file (only remove from registry)
+        #[arg(long)]
+        keep_file: bool,
     },
 }
 
@@ -78,6 +68,12 @@ enum Commands {
         /// Use candle backend
         #[arg(long)]
         candle: bool,
+        /// LoRA models to apply (can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        lora: Vec<String>,
+        /// Base model to use
+        #[arg(long, short = 'b')]
+        base_model: Option<String>,
     },
     /// Setup models and dependencies
     Setup {
@@ -90,8 +86,6 @@ enum Commands {
         /// Force re-download even if file exists
         #[arg(long, short)]
         force: bool,
-        /// Setup component type
-        component: Option<SetupComponent>,
     },
     /// LoRA culture management
     Lora {
@@ -115,57 +109,48 @@ async fn main() -> Result<(), CliError> {
             message,
             once,
             candle,
+            lora,
+            base_model,
         }) => {
-            commands::run_chat(message.clone(), *once, *candle).await?;
+            commands::run_chat(
+                message.clone(),
+                *once,
+                *candle,
+                lora.clone(),
+                base_model.clone(),
+            )
+            .await?;
         }
-        Some(Commands::Setup {
-            list,
-            model,
-            force,
-            component,
-        }) => {
-            if let Some(comp) = component {
-                match comp {
-                    SetupComponent::Lora => commands::setup_lora().await?,
-                }
-            } else {
-                commands::run_setup(*list, model.clone(), *force).await?;
-            }
+        Some(Commands::Setup { list, model, force }) => {
+            commands::run_setup(*list, model.clone(), *force).await?;
         }
         Some(Commands::Lora { command }) => match command {
-            Some(LoraCommands::New { culture_name }) => {
-                commands::lora_new(culture_name).await?;
+            Some(LoraCommands::Add {
+                source,
+                name,
+                base_model,
+                description,
+            }) => {
+                commands::lora_add(
+                    source,
+                    name.clone(),
+                    base_model.clone(),
+                    description.clone(),
+                )
+                .await?;
             }
             Some(LoraCommands::List) => {
                 commands::lora_list().await?;
             }
-            Some(LoraCommands::Train {
-                culture_name,
-                epochs,
-                batch_size,
-                learning_rate,
-                lora_rank,
-                lora_alpha,
-                lora_dropout,
-            }) => {
-                commands::lora_train(
-                    culture_name,
-                    *epochs,
-                    *batch_size,
-                    *learning_rate,
-                    *lora_rank,
-                    *lora_alpha,
-                    *lora_dropout,
-                )
-                .await?;
+            Some(LoraCommands::Show { name }) => {
+                commands::lora_show(name).await?;
             }
-            Some(LoraCommands::Apply { culture_name }) => {
-                println!("Applying LoRA culture: {}", culture_name);
-                // TODO: Implement apply command
+            Some(LoraCommands::Remove { name, keep_file }) => {
+                commands::lora_remove(name, *keep_file).await?;
             }
             None => {
                 // Show help when no subcommand is provided
-                println!("LoRA culture management commands\n");
+                println!("LoRA model management commands\n");
                 println!("Use --help for more information");
             }
         },

@@ -57,13 +57,17 @@ pub async fn run_setup(list: bool, model: Option<String>, force: bool) -> Result
         return Ok(());
     }
 
-    // Create models directory if it doesn't exist
+    // Create necessary directories
     let models_dir = Path::new("models");
-    if !models_dir.exists() {
-        println!("📁 Creating models directory...");
-        fs::create_dir_all(models_dir).map_err(|e| {
-            CliError::InvalidInput(format!("Failed to create models directory: {}", e))
-        })?;
+    let directories = vec!["models", "loras", "lora_datasets", "base_models"];
+    for dir in &directories {
+        let path = Path::new(dir);
+        if !path.exists() {
+            println!("📁 Creating {} directory...", dir);
+            fs::create_dir_all(path).map_err(|e| {
+                CliError::InvalidInput(format!("Failed to create {} directory: {}", dir, e))
+            })?;
+        }
     }
 
     // Determine which models to download
