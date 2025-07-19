@@ -1,10 +1,10 @@
 //! Training functionality for Kairei-candle
 
 use crate::CandleError;
-use candle_core::{DType, Device};
+use candle_core::{DType, Device, Tensor};
 use candle_lora::LoraConfig;
-use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
-use candle_transformers::models::llama2_c::{self, Config, Llama};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap, loss};
+use candle_transformers::models::llama2_c::{self, Cache, Config, Llama};
 use candle_transformers::models::llama2_c_weights::TransformerWeights;
 use std::path::Path;
 
@@ -54,7 +54,7 @@ fn init_tokenizer() -> Result<tokenizers::Tokenizer, CandleError> {
 
         // For now, we'll create a simple tokenizer
         // In production, this should load a proper tokenizer
-        let vocab_size = 32000;
+        let _vocab_size = 32000;
 
         // This is a placeholder - in real implementation,
         // we should load a proper tokenizer model
@@ -66,9 +66,9 @@ fn init_tokenizer() -> Result<tokenizers::Tokenizer, CandleError> {
 
 /// Initialize model with LoRA
 fn init_model_with_lora(
-    lora_config: &LoraConfig,
+    _lora_config: &LoraConfig,
     device: &Device,
-) -> Result<(Llama, VarMap), CandleError> {
+) -> Result<(Llama, VarMap, Cache), CandleError> {
     println!("🤖 Initializing model with LoRA...");
 
     // Create tiny config for testing
@@ -104,8 +104,8 @@ fn init_model_with_lora(
         let weights = TransformerWeights::from_reader(&mut file, &file_config, device)
             .map_err(|e| CandleError::Other(format!("Failed to load weights: {}", e)))?;
 
-        // Create cache
-        let cache = llama2_c::Cache::new(true, &file_config, vb.pp("rot"))?;
+        // Create cache (disable KV cache for training)
+        let cache = llama2_c::Cache::new(false, &file_config, vb.pp("rot"))?;
 
         // Create VarBuilder from weights
         let weight_vb = weights.var_builder(&file_config, device)?;
@@ -114,18 +114,18 @@ fn init_model_with_lora(
         let model = Llama::load(weight_vb, file_config)?;
 
         println!("✅ Base model loaded successfully!");
-        Ok((model, varmap))
+        Ok((model, varmap, cache))
     } else {
         println!("⚠️  Base model not found, creating random initialized model");
 
-        // Create cache
-        let cache = llama2_c::Cache::new(true, &config, vb.pp("rot"))?;
+        // Create cache (disable KV cache for training)
+        let cache = llama2_c::Cache::new(false, &config, vb.pp("rot"))?;
 
         // Create model with random weights
         let model = Llama::load(vb, config)?;
 
         println!("✅ Model initialized with random weights");
-        Ok((model, varmap))
+        Ok((model, varmap, cache))
     }
 }
 
@@ -167,7 +167,7 @@ pub fn train_lora(config: TrainingConfig) -> Result<(), CandleError> {
     }
 
     // Initialize model with LoRA
-    let (model, varmap) = init_model_with_lora(&lora_config, &device)?;
+    let (model, varmap, mut cache) = init_model_with_lora(&lora_config, &device)?;
 
     // Set up optimizer
     let params = ParamsAdamW {
@@ -177,27 +177,106 @@ pub fn train_lora(config: TrainingConfig) -> Result<(), CandleError> {
         eps: 1e-8,
         weight_decay: 0.01,
     };
-    let optimizer = AdamW::new(varmap.all_vars(), params)?;
+    let mut optimizer = AdamW::new(varmap.all_vars(), params)?;
     println!(
         "📈 Optimizer initialized with learning rate: {}",
         config.learning_rate
     );
 
-    // TODO: Training loop
+    // Get tokenizer for training
+    let tokenizer = match init_tokenizer() {
+        Ok(t) => t,
+        Err(_) => {
+            println!("⚠️  Skipping actual training due to tokenizer initialization failure");
+            return Ok(());
+        }
+    };
+
+    // Training loop
     println!("🏃 Starting training loop...");
     for epoch in 0..config.epochs {
         println!("\n📊 Epoch {}/{}", epoch + 1, config.epochs);
 
-        // TODO: Implement actual training steps
-        // 1. Load batch of data
-        // 2. Forward pass
-        // 3. Calculate loss
-        // 4. Backward pass
-        // 5. Update weights
+        let mut total_loss = 0.0;
+        let mut batch_count = 0;
 
-        println!("   Progress: [##########] 100%");
+        // Process each training sample
+        for (idx, text) in training_data.iter().enumerate() {
+            // Tokenize the text
+            let tokens = tokenizer
+                .encode(text.as_str(), true)
+                .map_err(|e| CandleError::Other(format!("Tokenization failed: {}", e)))?
+                .get_ids()
+                .to_vec();
+
+            if tokens.len() < 2 {
+                continue; // Skip very short sequences
+            }
+
+            // Create input and target tensors
+            let input_tokens = &tokens[..tokens.len() - 1];
+            let target_tokens = &tokens[1..];
+
+            let input = Tensor::new(input_tokens, &device)?.unsqueeze(0)?;
+            let target = Tensor::new(target_tokens, &device)?.unsqueeze(0)?;
+
+            // Debug info
+            println!("\n   Debug - Input shape: {:?}", input.shape());
+            println!("   Debug - Target shape: {:?}", target.shape());
+
+            // Forward pass
+            let logits = model.forward(&input, 0, &mut cache)?;
+
+            // Calculate loss
+            let loss = loss::cross_entropy(&logits.flatten_to(1)?, &target.flatten_to(1)?)?;
+
+            // Backward pass and optimizer step
+            optimizer.backward_step(&loss)?;
+
+            // Track loss
+            let loss_value = loss.to_vec0::<f32>()? as f64;
+            total_loss += loss_value;
+            batch_count += 1;
+
+            // Progress update
+            let progress = (idx + 1) as f32 / training_data.len() as f32;
+            let bar_width = 20;
+            let filled = (progress * bar_width as f32) as usize;
+            let empty = bar_width - filled;
+            print!(
+                "\r   Progress: [{}{}] {:.1}% | Loss: {:.4}",
+                "█".repeat(filled),
+                " ".repeat(empty),
+                progress * 100.0,
+                loss_value
+            );
+            std::io::Write::flush(&mut std::io::stdout())
+                .map_err(|e| CandleError::Other(format!("Flush failed: {}", e)))?;
+        }
+
+        // Print epoch summary
+        let avg_loss = if batch_count > 0 {
+            total_loss / batch_count as f64
+        } else {
+            0.0
+        };
+        println!("\n   Average loss: {:.4}", avg_loss);
+
+        // Save checkpoint every epoch
+        if epoch % 1 == 0 {
+            let checkpoint_name = format!("checkpoint_epoch_{}.safetensors", epoch + 1);
+            varmap.save(&checkpoint_name)?;
+            println!("   💾 Saved checkpoint: {}", checkpoint_name);
+        }
     }
 
-    println!("\n🎉 Training completed!");
+    // Save final model
+    let final_model_path = format!("lora_{}_final.safetensors", config.culture_name);
+    varmap.save(&final_model_path)?;
+    println!(
+        "\n🎉 Training completed! Final model saved to: {}",
+        final_model_path
+    );
+
     Ok(())
 }

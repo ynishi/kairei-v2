@@ -202,7 +202,15 @@ pub async fn lora_list() -> Result<(), CliError> {
     Ok(())
 }
 
-pub async fn lora_train(culture_name: &str) -> Result<(), CliError> {
+pub async fn lora_train(
+    culture_name: &str,
+    epochs: Option<usize>,
+    batch_size: Option<usize>,
+    learning_rate: Option<f64>,
+    lora_rank: Option<usize>,
+    lora_alpha: Option<f64>,
+    lora_dropout: Option<f32>,
+) -> Result<(), CliError> {
     println!("🚀 Training LoRA culture: {}", culture_name);
 
     // Check if culture exists
@@ -222,24 +230,68 @@ pub async fn lora_train(culture_name: &str) -> Result<(), CliError> {
     let lora_config: LoraConfig = toml::from_str(&config_content)
         .map_err(|e| CliError::InvalidInput(format!("Failed to parse config.toml: {}", e)))?;
 
-    println!("📋 Loaded configuration:");
+    // Override config values with CLI arguments if provided
+    let final_epochs = epochs.unwrap_or(lora_config.training.epochs);
+    let final_batch_size = batch_size.unwrap_or(lora_config.training.batch_size);
+    let final_learning_rate = learning_rate.unwrap_or(lora_config.training.learning_rate);
+    let final_lora_rank = lora_rank.unwrap_or(lora_config.lora.rank);
+    let final_lora_alpha = lora_alpha.unwrap_or(lora_config.lora.alpha);
+    let final_lora_dropout = lora_dropout.or(Some(lora_config.lora.dropout));
+
+    println!("📋 Training configuration:");
     println!("   Culture: {}", lora_config.culture.name);
     println!("   Model: {}", lora_config.model.base_model);
-    println!("   Epochs: {}", lora_config.training.epochs);
-    println!("   Batch size: {}", lora_config.training.batch_size);
-    println!("   Learning rate: {}", lora_config.training.learning_rate);
-    println!("   LoRA rank: {}", lora_config.lora.rank);
-    println!("   LoRA alpha: {}", lora_config.lora.alpha);
+    println!(
+        "   Epochs: {}{}",
+        final_epochs,
+        if epochs.is_some() { " (from CLI)" } else { "" }
+    );
+    println!(
+        "   Batch size: {}{}",
+        final_batch_size,
+        if batch_size.is_some() {
+            " (from CLI)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "   Learning rate: {}{}",
+        final_learning_rate,
+        if learning_rate.is_some() {
+            " (from CLI)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "   LoRA rank: {}{}",
+        final_lora_rank,
+        if lora_rank.is_some() {
+            " (from CLI)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "   LoRA alpha: {}{}",
+        final_lora_alpha,
+        if lora_alpha.is_some() {
+            " (from CLI)"
+        } else {
+            ""
+        }
+    );
 
-    // Create training config from loaded config
+    // Create training config with final values
     let training_config = kairei::TrainingConfig {
         culture_name: lora_config.culture.name,
-        epochs: lora_config.training.epochs,
-        batch_size: lora_config.training.batch_size,
-        learning_rate: lora_config.training.learning_rate,
-        lora_rank: lora_config.lora.rank,
-        lora_alpha: lora_config.lora.alpha,
-        lora_dropout: Some(lora_config.lora.dropout),
+        epochs: final_epochs,
+        batch_size: final_batch_size,
+        learning_rate: final_learning_rate,
+        lora_rank: final_lora_rank,
+        lora_alpha: final_lora_alpha,
+        lora_dropout: final_lora_dropout,
     };
 
     // Call the training function through kairei

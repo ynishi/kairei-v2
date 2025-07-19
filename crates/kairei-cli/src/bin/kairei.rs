@@ -29,6 +29,30 @@ enum LoraCommands {
     Train {
         /// Culture name
         culture_name: String,
+
+        /// Number of epochs (overrides config.toml)
+        #[arg(long, short = 'e')]
+        epochs: Option<usize>,
+
+        /// Batch size (overrides config.toml)
+        #[arg(long, short = 'b')]
+        batch_size: Option<usize>,
+
+        /// Learning rate (overrides config.toml)
+        #[arg(long, short = 'l')]
+        learning_rate: Option<f64>,
+
+        /// LoRA rank (overrides config.toml)
+        #[arg(long)]
+        lora_rank: Option<usize>,
+
+        /// LoRA alpha (overrides config.toml)
+        #[arg(long)]
+        lora_alpha: Option<f64>,
+
+        /// LoRA dropout (overrides config.toml)
+        #[arg(long)]
+        lora_dropout: Option<f32>,
     },
     /// Apply a LoRA culture
     Apply {
@@ -115,8 +139,25 @@ async fn main() -> Result<(), CliError> {
             Some(LoraCommands::List) => {
                 commands::lora_list().await?;
             }
-            Some(LoraCommands::Train { culture_name }) => {
-                commands::lora_train(culture_name).await?;
+            Some(LoraCommands::Train {
+                culture_name,
+                epochs,
+                batch_size,
+                learning_rate,
+                lora_rank,
+                lora_alpha,
+                lora_dropout,
+            }) => {
+                commands::lora_train(
+                    culture_name,
+                    *epochs,
+                    *batch_size,
+                    *learning_rate,
+                    *lora_rank,
+                    *lora_alpha,
+                    *lora_dropout,
+                )
+                .await?;
             }
             Some(LoraCommands::Apply { culture_name }) => {
                 println!("Applying LoRA culture: {}", culture_name);
