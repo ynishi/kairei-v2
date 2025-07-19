@@ -17,6 +17,27 @@ enum SetupComponent {
 }
 
 #[derive(clap::Subcommand)]
+enum LoraCommands {
+    /// Create a new LoRA culture
+    New {
+        /// Culture name
+        culture_name: String,
+    },
+    /// List all LoRA cultures
+    List,
+    /// Train a LoRA culture
+    Train {
+        /// Culture name
+        culture_name: String,
+    },
+    /// Apply a LoRA culture
+    Apply {
+        /// Culture name
+        culture_name: String,
+    },
+}
+
+#[derive(clap::Subcommand)]
 enum Commands {
     /// Initialize a new Kairei project
     Init,
@@ -48,11 +69,10 @@ enum Commands {
         /// Setup component type
         component: Option<SetupComponent>,
     },
-    /// LoRA culture management commands
-    #[command(name = "lora:new")]
-    LoraNew {
-        /// Culture name
-        culture_name: String,
+    /// LoRA culture management
+    Lora {
+        #[command(subcommand)]
+        command: Option<LoraCommands>,
     },
 }
 
@@ -88,9 +108,26 @@ async fn main() -> Result<(), CliError> {
                 commands::run_setup(*list, model.clone(), *force).await?;
             }
         }
-        Some(Commands::LoraNew { culture_name }) => {
-            commands::lora_new(culture_name).await?;
-        }
+        Some(Commands::Lora { command }) => match command {
+            Some(LoraCommands::New { culture_name }) => {
+                commands::lora_new(culture_name).await?;
+            }
+            Some(LoraCommands::List) => {
+                commands::lora_list().await?;
+            }
+            Some(LoraCommands::Train { culture_name }) => {
+                commands::lora_train(culture_name).await?;
+            }
+            Some(LoraCommands::Apply { culture_name }) => {
+                println!("Applying LoRA culture: {}", culture_name);
+                // TODO: Implement apply command
+            }
+            None => {
+                // Show help when no subcommand is provided
+                println!("LoRA culture management commands\n");
+                println!("Use --help for more information");
+            }
+        },
         None => {
             println!("Kairei-v2 AgentCulture Framework");
             println!("Use --help for more information");

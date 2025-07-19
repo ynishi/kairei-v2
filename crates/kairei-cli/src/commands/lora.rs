@@ -97,3 +97,76 @@ target_modules = ["q_proj", "v_proj"]  # Which layers to apply LoRA to
 
     Ok(())
 }
+
+pub async fn lora_list() -> Result<(), CliError> {
+    println!("📋 Listing all LoRA cultures...\n");
+
+    let loras_dir = Path::new("loras");
+    if !loras_dir.exists() {
+        println!("❌ LoRA environment not initialized. Please run: kairei setup lora");
+        return Ok(());
+    }
+
+    let mut cultures = Vec::new();
+
+    // Read all directories in loras/
+    let entries = fs::read_dir(loras_dir)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to read loras directory: {}", e)))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| {
+            CliError::InvalidInput(format!("Failed to read directory entry: {}", e))
+        })?;
+
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(culture_name) = path.file_name() {
+                if let Some(culture_name_str) = culture_name.to_str() {
+                    // Check if config.toml exists (to verify it's a valid culture)
+                    let config_path = path.join("config.toml");
+                    let has_config = config_path.exists();
+
+                    // Check if dataset directory exists
+                    let dataset_path = path.join("dataset");
+                    let has_dataset = dataset_path.exists();
+
+                    // Count dataset files if directory exists
+                    let dataset_count = if has_dataset {
+                        fs::read_dir(&dataset_path)
+                            .map(|entries| entries.count())
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    };
+
+                    cultures.push((culture_name_str.to_string(), has_config, dataset_count));
+                }
+            }
+        }
+    }
+
+    if cultures.is_empty() {
+        println!("No LoRA cultures found. Create one with: kairei lora:new <culture_name>");
+    } else {
+        println!("Found {} culture(s):", cultures.len());
+        println!("─────────────────────────────────────────");
+
+        for (name, has_config, dataset_count) in cultures {
+            println!("📂 {}", name);
+            if has_config {
+                println!("   ✅ config.toml");
+            } else {
+                println!("   ❌ config.toml (missing)");
+            }
+            println!("   📊 {} dataset file(s)", dataset_count);
+            println!();
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn lora_train(culture_name: &str) -> Result<(), CliError> {
+    println!("🚀 Training LoRA culture: {}", culture_name);
+    Ok(())
+}
