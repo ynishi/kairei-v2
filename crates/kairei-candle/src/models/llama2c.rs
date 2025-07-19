@@ -328,6 +328,51 @@ impl Llama {
     }
 
     pub fn apply_lora(&mut self, lora_manager: &crate::models::lora::LoraManager) -> Result<()> {
-        todo!("apply_lora implementation")
+        println!("🚀 Applying LoRA to Llama model...");
+
+        // Apply LoRA to lm_head
+        self.lm_head = lora_manager.apply_to_linear(self.lm_head.base.clone(), "lm_head");
+
+        // Apply LoRA to each block
+        for (block_idx, block) in self.blocks.iter_mut().enumerate() {
+            println!("  📦 Processing block {}", block_idx);
+
+            // Apply LoRA to attention layers
+            let attn = &mut block.attn;
+            attn.q_proj = lora_manager.apply_to_linear(
+                attn.q_proj.base.clone(),
+                &format!("model.layers.{}.self_attn.q_proj", block_idx),
+            );
+            attn.k_proj = lora_manager.apply_to_linear(
+                attn.k_proj.base.clone(),
+                &format!("model.layers.{}.self_attn.k_proj", block_idx),
+            );
+            attn.v_proj = lora_manager.apply_to_linear(
+                attn.v_proj.base.clone(),
+                &format!("model.layers.{}.self_attn.v_proj", block_idx),
+            );
+            attn.o_proj = lora_manager.apply_to_linear(
+                attn.o_proj.base.clone(),
+                &format!("model.layers.{}.self_attn.o_proj", block_idx),
+            );
+
+            // Apply LoRA to MLP layers
+            let mlp = &mut block.mlp;
+            mlp.c_fc1 = lora_manager.apply_to_linear(
+                mlp.c_fc1.base.clone(),
+                &format!("model.layers.{}.mlp.gate_proj", block_idx),
+            );
+            mlp.c_fc2 = lora_manager.apply_to_linear(
+                mlp.c_fc2.base.clone(),
+                &format!("model.layers.{}.mlp.up_proj", block_idx),
+            );
+            mlp.c_proj = lora_manager.apply_to_linear(
+                mlp.c_proj.base.clone(),
+                &format!("model.layers.{}.mlp.down_proj", block_idx),
+            );
+        }
+
+        println!("✅ LoRA application complete!");
+        Ok(())
     }
 }

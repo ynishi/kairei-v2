@@ -40,7 +40,7 @@ impl Default for LoraConfig {
 #[derive(Debug, Clone)]
 pub struct LoraLinear {
     /// Base linear layer
-    base: Linear,
+    pub base: Linear,
     /// LoRA A matrix (down projection)
     lora_a: Option<Tensor>,
     /// LoRA B matrix (up projection)

@@ -60,52 +60,39 @@ pub async fn run_chat(
     let app = if use_candle {
         println!("🔥 Initializing Candle backend (LLaMA2-C)...");
 
-        // Create processor with LoRA if specified
-        let processor = if !lora_paths.is_empty() {
-            println!("🔧 Applying LoRA adapters...");
-            // Use builder with LoRA adapters
-            let default_model_path = "stories110M.bin";
-            println!("📦 Creating Llama2CProcessorBuilder with LoRA support...");
-            let mut builder = kairei::Llama2CProcessorBuilder::new();
-            println!("   ✅ Builder created successfully");
+        // Create processor builder
+        let mut builder = kairei::Llama2CProcessorBuilder::new();
 
-            // Set model source
-            if std::path::Path::new(default_model_path).exists() {
-                println!("   📄 Found model file: {}", default_model_path);
-                builder = builder.with_model_file(default_model_path);
-            } else {
-                println!(
-                    "   ⚠️  Model file not found: {}, using default config",
-                    default_model_path
-                );
-            }
-
-            // Add LoRA adapters
-            println!("   🔗 Adding {} LoRA adapter(s)", lora_paths.len());
-            builder = builder.with_loras(lora_paths);
-
-            println!("   🏗️  Building processor with LoRA...");
-            builder.build()?
+        // Use the appropriate model file path
+        let model_path = if let Some(ref model) = base_model {
+            model.as_str()
         } else {
-            // Use builder for default tiny model
-            let default_model_path = "models/stories15M.bin";
-            println!("📦 Creating Llama2CProcessorBuilder for default model...");
-            let builder = if std::path::Path::new(default_model_path).exists() {
-                println!("   📄 Found model file: {}", default_model_path);
-                kairei::Llama2CProcessorBuilder::new().with_model_file(default_model_path)
-            } else {
-                // Fall back to zero-initialized model with tiny config
-                println!(
-                    "   ⚠️  Model file not found: {}, using tiny config",
-                    default_model_path
-                );
-                kairei::Llama2CProcessorBuilder::new()
-            };
-
-            println!("   🏗️  Building processor...");
-            builder.build()?
+            "models/stories15M.bin"
         };
 
+        // Add model file if it exists
+        if std::path::Path::new(model_path).exists() {
+            println!("📄 Found model file: {}", model_path);
+            builder = builder.with_model_file(model_path);
+        } else {
+            println!(
+                "⚠️  Model file not found: {}, using default config",
+                model_path
+            );
+        }
+
+        // Add LoRA adapters if any
+        if !lora_paths.is_empty() {
+            println!("🔧 Adding {} LoRA adapter(s)...", lora_paths.len());
+            for (idx, path) in lora_paths.iter().enumerate() {
+                println!("   [{}] {}", idx + 1, path.display());
+            }
+            builder = builder.with_loras(lora_paths);
+        }
+
+        // Build the processor
+        println!("🏗️  Building processor...");
+        let processor = builder.build()?;
         println!("✅ LLaMA2-C backend ready!");
 
         KaireiApp::builder("kairei-chat")

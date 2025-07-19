@@ -26,6 +26,7 @@ pub enum ModelSource {
 }
 
 /// Tokenizer source variants
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum TokenizerSource {
     /// Load from file
