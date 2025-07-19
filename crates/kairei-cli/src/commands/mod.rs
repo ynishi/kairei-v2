@@ -8,6 +8,6 @@ pub mod setup;
 
 pub use chat::run_chat;
 pub use init::run_init;
-pub use lora::{lora_list, lora_new, setup_lora, lora_train};
+pub use lora::{lora_list, lora_new, lora_train, setup_lora};
 pub use run::run_run;
 pub use setup::run_setup;

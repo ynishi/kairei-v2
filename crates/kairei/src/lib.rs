@@ -4,6 +4,7 @@
 //! abstractions for building LLM applications and agents.
 
 pub mod app;
+pub mod lora;
 
 // Re-export core types
 pub use kairei_core::{
@@ -13,6 +14,9 @@ pub use kairei_core::{
 
 // Re-export app types
 pub use app::{AppMetadata, AppMode, KaireiApp, KaireiAppBuilder};
+
+// Re-export lora types
+pub use lora::{TrainingConfig, train_lora};
 
 // Feature-gated re-exports
 #[cfg(feature = "candle")]

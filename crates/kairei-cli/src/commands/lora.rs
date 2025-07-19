@@ -1,6 +1,42 @@
 use crate::error::CliError;
+use serde::Deserialize;
 use std::fs;
 use std::path::Path;
+
+#[derive(Debug, Deserialize)]
+struct LoraConfig {
+    culture: CultureConfig,
+    model: ModelConfig,
+    training: TrainingConfig,
+    lora: LoraSpecificConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct CultureConfig {
+    name: String,
+    description: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelConfig {
+    base_model: String,
+    model_path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TrainingConfig {
+    epochs: usize,
+    batch_size: usize,
+    learning_rate: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoraSpecificConfig {
+    rank: usize,
+    alpha: f64,
+    dropout: f32,
+    target_modules: Vec<String>,
+}
 
 pub async fn setup_lora() -> Result<(), CliError> {
     println!("🔧 Setting up LoRA development environment...");
@@ -168,5 +204,48 @@ pub async fn lora_list() -> Result<(), CliError> {
 
 pub async fn lora_train(culture_name: &str) -> Result<(), CliError> {
     println!("🚀 Training LoRA culture: {}", culture_name);
+
+    // Check if culture exists
+    let culture_dir = Path::new("loras").join(culture_name);
+    if !culture_dir.exists() {
+        return Err(CliError::InvalidInput(format!(
+            "Culture '{}' does not exist. Create it with: kairei lora new {}",
+            culture_name, culture_name
+        )));
+    }
+
+    // Read config.toml
+    let config_path = culture_dir.join("config.toml");
+    let config_content = fs::read_to_string(&config_path)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to read config.toml: {}", e)))?;
+
+    let lora_config: LoraConfig = toml::from_str(&config_content)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to parse config.toml: {}", e)))?;
+
+    println!("📋 Loaded configuration:");
+    println!("   Culture: {}", lora_config.culture.name);
+    println!("   Model: {}", lora_config.model.base_model);
+    println!("   Epochs: {}", lora_config.training.epochs);
+    println!("   Batch size: {}", lora_config.training.batch_size);
+    println!("   Learning rate: {}", lora_config.training.learning_rate);
+    println!("   LoRA rank: {}", lora_config.lora.rank);
+    println!("   LoRA alpha: {}", lora_config.lora.alpha);
+
+    // Create training config from loaded config
+    let training_config = kairei::TrainingConfig {
+        culture_name: lora_config.culture.name,
+        epochs: lora_config.training.epochs,
+        batch_size: lora_config.training.batch_size,
+        learning_rate: lora_config.training.learning_rate,
+        lora_rank: lora_config.lora.rank,
+        lora_alpha: lora_config.lora.alpha,
+        lora_dropout: Some(lora_config.lora.dropout),
+    };
+
+    // Call the training function through kairei
+    kairei::train_lora(training_config)
+        .map_err(|e| CliError::InvalidInput(format!("Training failed: {}", e)))?;
+
+    println!("✅ Training completed!");
     Ok(())
 }
