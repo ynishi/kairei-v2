@@ -63,12 +63,47 @@ pub async fn run_chat(
         // Create processor with LoRA if specified
         let processor = if !lora_paths.is_empty() {
             println!("🔧 Applying LoRA adapters...");
-            // TODO: Create processor with LoRA support
-            // For now, we'll create the standard processor and warn
-            println!("⚠️  LoRA support is not yet implemented in Candle backend");
-            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?
+            // Use builder with LoRA adapters
+            let default_model_path = "stories110M.bin";
+            println!("📦 Creating Llama2CProcessorBuilder with LoRA support...");
+            let mut builder = kairei::Llama2CProcessorBuilder::new();
+            println!("   ✅ Builder created successfully");
+
+            // Set model source
+            if std::path::Path::new(default_model_path).exists() {
+                println!("   📄 Found model file: {}", default_model_path);
+                builder = builder.with_model_file(default_model_path);
+            } else {
+                println!(
+                    "   ⚠️  Model file not found: {}, using default config",
+                    default_model_path
+                );
+            }
+
+            // Add LoRA adapters
+            println!("   🔗 Adding {} LoRA adapter(s)", lora_paths.len());
+            builder = builder.with_loras(lora_paths);
+
+            println!("   🏗️  Building processor with LoRA...");
+            builder.build()?
         } else {
-            kairei::Llama2CProcessor::new_tiny().map_err(|e| CliError::Core(e.to_string()))?
+            // Use builder for default tiny model
+            let default_model_path = "models/stories15M.bin";
+            println!("📦 Creating Llama2CProcessorBuilder for default model...");
+            let builder = if std::path::Path::new(default_model_path).exists() {
+                println!("   📄 Found model file: {}", default_model_path);
+                kairei::Llama2CProcessorBuilder::new().with_model_file(default_model_path)
+            } else {
+                // Fall back to zero-initialized model with tiny config
+                println!(
+                    "   ⚠️  Model file not found: {}, using tiny config",
+                    default_model_path
+                );
+                kairei::Llama2CProcessorBuilder::new()
+            };
+
+            println!("   🏗️  Building processor...");
+            builder.build()?
         };
 
         println!("✅ LLaMA2-C backend ready!");
@@ -76,15 +111,13 @@ pub async fn run_chat(
         KaireiApp::builder("kairei-chat")
             .llm_mode()
             .processor(processor)
-            .build()
-            .map_err(CliError::Core)?
+            .build()?
     } else {
         // Use echo processor as fallback
         KaireiApp::builder("kairei-chat")
             .llm_mode()
             .processor(kairei::app::processors::EchoProcessor)
-            .build()
-            .map_err(CliError::Core)?
+            .build()?
     };
 
     // If initial message provided, process it
@@ -93,10 +126,7 @@ pub async fn run_chat(
             println!("You: {}", msg);
         }
         let request = Request::simple(msg);
-        let response = app
-            .process(request)
-            .await
-            .map_err(|e| CliError::Core(e.to_string()))?;
+        let response = app.process(request).await?;
 
         // In once mode, just print the response without "Bot:" prefix
         if once {
@@ -135,10 +165,7 @@ pub async fn run_chat(
 
                 // Process through app
                 let request = Request::simple(input);
-                let response = app
-                    .process(request)
-                    .await
-                    .map_err(|e| CliError::Core(e.to_string()))?;
+                let response = app.process(request).await?;
                 println!("Bot: {}", response.message);
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {

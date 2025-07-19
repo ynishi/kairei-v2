@@ -1,16 +1,300 @@
 //! Simple LLaMA2-C based processor
 
 use crate::models::llama2c::{Cache, Llama, TransformerWeights};
+use crate::models::lora::{LoraConfig, LoraManager};
 use async_trait::async_trait;
 use candle_core::{DType, Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::generation::LogitsProcessor;
 use candle_transformers::models::llama2_c::Config;
 use kairei_core::{Processor, ProcessorMetadata, Request, Response, Result as CoreResult};
+use std::path::PathBuf;
 use std::sync::RwLock;
 use tokenizers::Tokenizer;
 
 use crate::CandleError;
+
+/// Model source variants
+#[derive(Clone)]
+pub enum ModelSource {
+    /// Load from file with path
+    File(PathBuf),
+    /// Use pre-defined config with zero weights
+    Config(Config),
+    /// Download from HuggingFace
+    HuggingFace { repo: String, file: String },
+}
+
+/// Tokenizer source variants
+#[derive(Clone)]
+pub enum TokenizerSource {
+    /// Load from file
+    File(PathBuf),
+    /// Use pre-loaded tokenizer
+    Instance(Tokenizer),
+    /// Download from HuggingFace
+    HuggingFace { repo: String, file: String },
+    /// Use default (will try local then HF)
+    Default,
+}
+
+/// Generation configuration
+#[derive(Clone)]
+pub struct GenerationConfig {
+    pub seed: u64,
+    pub temperature: f64,
+    pub top_p: Option<f64>,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            seed: 299792458,
+            temperature: 0.8,
+            top_p: Some(0.9),
+        }
+    }
+}
+
+/// Builder for creating Llama2CProcessor with flexible configuration
+#[derive(Clone)]
+pub struct Llama2CProcessorBuilder {
+    model_source: ModelSource,
+    tokenizer_source: TokenizerSource,
+    device: Device,
+    lora_paths: Vec<PathBuf>,
+    generation_config: GenerationConfig,
+}
+
+impl Default for Llama2CProcessorBuilder {
+    fn default() -> Self {
+        Self {
+            model_source: ModelSource::Config(Config::tiny_15m()),
+            tokenizer_source: TokenizerSource::Default,
+            device: Device::Cpu,
+            lora_paths: Vec::new(),
+            generation_config: GenerationConfig::default(),
+        }
+    }
+}
+
+impl Llama2CProcessorBuilder {
+    /// Create a new builder
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set model from file
+    pub fn with_model_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.model_source = ModelSource::File(path.into());
+        self
+    }
+
+    /// Set model from config (zero weights)
+    pub fn with_model_config(mut self, config: Config) -> Self {
+        self.model_source = ModelSource::Config(config);
+        self
+    }
+
+    /// Set model from HuggingFace
+    pub fn with_model_from_hf(mut self, repo: impl Into<String>, file: impl Into<String>) -> Self {
+        self.model_source = ModelSource::HuggingFace {
+            repo: repo.into(),
+            file: file.into(),
+        };
+        self
+    }
+
+    /// Set tokenizer from file
+    pub fn with_tokenizer_file(mut self, path: impl Into<PathBuf>) -> Self {
+        self.tokenizer_source = TokenizerSource::File(path.into());
+        self
+    }
+
+    /// Set tokenizer instance
+    pub fn with_tokenizer(mut self, tokenizer: Tokenizer) -> Self {
+        self.tokenizer_source = TokenizerSource::Instance(tokenizer);
+        self
+    }
+
+    /// Set tokenizer from HuggingFace
+    pub fn with_tokenizer_from_hf(
+        mut self,
+        repo: impl Into<String>,
+        file: impl Into<String>,
+    ) -> Self {
+        self.tokenizer_source = TokenizerSource::HuggingFace {
+            repo: repo.into(),
+            file: file.into(),
+        };
+        self
+    }
+
+    /// Add LoRA adapter
+    pub fn with_lora(mut self, path: impl Into<PathBuf>) -> Self {
+        self.lora_paths.push(path.into());
+        self
+    }
+
+    /// Add multiple LoRA adapters
+    pub fn with_loras(mut self, paths: impl IntoIterator<Item = impl Into<PathBuf>>) -> Self {
+        self.lora_paths.extend(paths.into_iter().map(|p| p.into()));
+        self
+    }
+
+    /// Set device
+    pub fn with_device(mut self, device: Device) -> Self {
+        self.device = device;
+        self
+    }
+
+    /// Set generation config
+    pub fn with_generation_config(mut self, config: GenerationConfig) -> Self {
+        self.generation_config = config;
+        self
+    }
+
+    /// Set seed
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.generation_config.seed = seed;
+        self
+    }
+
+    /// Set temperature
+    pub fn with_temperature(mut self, temperature: f64) -> Self {
+        self.generation_config.temperature = temperature;
+        self
+    }
+
+    /// Set top_p
+    pub fn with_top_p(mut self, top_p: Option<f64>) -> Self {
+        self.generation_config.top_p = top_p;
+        self
+    }
+
+    /// Build the processor
+    pub fn build(self) -> Result<Llama2CProcessor, CandleError> {
+        // 1. Load tokenizer
+        let tokenizer = self.load_tokenizer()?;
+
+        // 2. Load model and config
+        let (model, config, cache) = self.load_model()?;
+
+        // 3. Create logits processor
+        let logits_processor = LogitsProcessor::new(
+            self.generation_config.seed,
+            Some(self.generation_config.temperature),
+            self.generation_config.top_p,
+        );
+
+        // 4. Create base processor
+        let mut processor = Llama2CProcessor {
+            model,
+            config,
+            cache: RwLock::new(cache),
+            device: self.device.clone(),
+            tokenizer,
+            logits_processor: RwLock::new(logits_processor),
+            seed: self.generation_config.seed,
+            temperature: self.generation_config.temperature,
+            top_p: self.generation_config.top_p,
+        };
+
+        // 5. Apply LoRA if specified
+        if !self.lora_paths.is_empty() {
+            self.apply_lora(&mut processor)?;
+        }
+
+        Ok(processor)
+    }
+
+    /// Load tokenizer based on source
+    fn load_tokenizer(&self) -> Result<Tokenizer, CandleError> {
+        match &self.tokenizer_source {
+            TokenizerSource::File(path) => {
+                println!("Loading tokenizer from: {:?}", path);
+                Tokenizer::from_file(path).map_err(CandleError::Tokenizer)
+            }
+            TokenizerSource::Instance(tokenizer) => Ok(tokenizer.clone()),
+            TokenizerSource::HuggingFace { repo, file } => {
+                use hf_hub::api::sync::Api;
+                println!("Downloading tokenizer from HF: {}/{}", repo, file);
+                let api = Api::new().map_err(|e| CandleError::Other(e.to_string()))?;
+                let hf_repo = api.model(repo.clone());
+                let path = hf_repo
+                    .get(file)
+                    .map_err(|e| CandleError::Other(e.to_string()))?;
+                Tokenizer::from_file(path).map_err(CandleError::Tokenizer)
+            }
+            TokenizerSource::Default => Llama2CProcessor::load_tokenizer(None),
+        }
+    }
+
+    /// Load model based on source
+    fn load_model(&self) -> Result<(Llama, Config, Cache), CandleError> {
+        match &self.model_source {
+            ModelSource::File(path) => {
+                let mut file = std::fs::File::open(path)
+                    .map_err(|e| CandleError::Other(format!("Failed to open model file: {}", e)))?;
+
+                let config = Config::from_reader(&mut file)
+                    .map_err(|e| CandleError::Other(format!("Failed to read config: {}", e)))?;
+
+                let weights = TransformerWeights::from_reader(&mut file, &config, &self.device)
+                    .map_err(|e| CandleError::Other(format!("Failed to load weights: {}", e)))?;
+
+                let vb = weights.var_builder(&config, &self.device).map_err(|e| {
+                    CandleError::Other(format!("Failed to create var builder: {}", e))
+                })?;
+
+                let cache = Cache::new(true, &config, vb.pp("rot"))?;
+                let model = Llama::load(vb, config.clone())?;
+
+                Ok((model, config, cache))
+            }
+            ModelSource::Config(config) => {
+                let vb = VarBuilder::zeros(DType::F32, &self.device);
+                let cache = Cache::new(true, config, vb.pp("rot"))?;
+                let model = Llama::load(vb, config.clone())?;
+                Ok((model, config.clone(), cache))
+            }
+            ModelSource::HuggingFace { repo, file } => {
+                use hf_hub::api::sync::Api;
+                println!("Downloading model from HF: {}/{}", repo, file);
+                let api = Api::new().map_err(|e| CandleError::Other(e.to_string()))?;
+                let hf_repo = api.model(repo.clone());
+                let path = hf_repo
+                    .get(file)
+                    .map_err(|e| CandleError::Other(e.to_string()))?;
+
+                // Then load from downloaded file
+                self.clone().with_model_file(path).load_model()
+            }
+        }
+    }
+
+    /// Apply LoRA adapters
+    fn apply_lora(&self, processor: &mut Llama2CProcessor) -> Result<(), CandleError> {
+        println!("📎 Applying {} LoRA adapter(s)...", self.lora_paths.len());
+
+        let lora_config = LoraConfig::default();
+        let mut lora_manager = LoraManager::new(lora_config);
+
+        for (idx, lora_path) in self.lora_paths.iter().enumerate() {
+            println!(
+                "   [{}] Loading LoRA from: {}",
+                idx + 1,
+                lora_path.display()
+            );
+            lora_manager.load_from_safetensors(lora_path.to_str().unwrap(), &processor.device)?;
+        }
+
+        processor.model.apply_lora(&lora_manager)?;
+        println!("   🎯 LoRA adapters applied!");
+
+        Ok(())
+    }
+}
 
 /// LLaMA2-C based processor
 pub struct Llama2CProcessor {
@@ -30,113 +314,6 @@ pub struct Llama2CProcessor {
 }
 
 impl Llama2CProcessor {
-    /// Create a new Llama2CProcessor with tiny config
-    pub fn new_tiny() -> Result<Self, CandleError> {
-        // Try to load from default model file first
-        let default_model_path = "models/stories15M.bin";
-        if std::path::Path::new(default_model_path).exists() {
-            println!("Loading model from: {}", default_model_path);
-            Self::new_from_file(default_model_path)
-        } else {
-            // Fall back to zero-initialized model
-            println!("Model file not found, using zero-initialized weights");
-            let tokenizer = Self::load_tokenizer(None)?;
-            Self::new_with_tokenizer(tokenizer)
-        }
-    }
-
-    /// Create a new Llama2CProcessor with model weights from file
-    pub fn new_from_file(model_path: &str) -> Result<Self, CandleError> {
-        let tokenizer = Self::load_tokenizer(None)?;
-        let device = Device::Cpu;
-
-        // Load model from file
-        let mut file = std::fs::File::open(model_path)
-            .map_err(|e| CandleError::Other(format!("Failed to open model file: {}", e)))?;
-
-        // Read config from the model file
-        let config = Config::from_reader(&mut file)
-            .map_err(|e| CandleError::Other(format!("Failed to read config: {}", e)))?;
-
-        println!(
-            "Loaded model config: dim={}, n_layers={}, n_heads={}",
-            config.dim, config.n_layers, config.n_heads
-        );
-
-        // Load weights
-        let weights = TransformerWeights::from_reader(&mut file, &config, &device)
-            .map_err(|e| CandleError::Other(format!("Failed to load weights: {}", e)))?;
-
-        // Create VarBuilder from weights
-        let vb = weights
-            .var_builder(&config, &device)
-            .map_err(|e| CandleError::Other(format!("Failed to create var builder: {}", e)))?;
-
-        // Create cache
-        let cache = Cache::new(true, &config, vb.pp("rot"))?;
-
-        // Load model
-        let model = Llama::load(vb, config.clone())?;
-
-        // Initialize generation parameters
-        let seed = 299792458;
-        let temperature = 0.8;
-        let top_p = Some(0.9);
-        let logits_processor = LogitsProcessor::new(seed, Some(temperature), top_p);
-
-        Ok(Self {
-            model,
-            config,
-            cache: RwLock::new(cache),
-            device,
-            tokenizer,
-            logits_processor: RwLock::new(logits_processor),
-            seed,
-            temperature,
-            top_p,
-        })
-    }
-
-    /// Create a new Llama2CProcessor with custom tokenizer path
-    pub fn new_with_tokenizer_path(tokenizer_path: Option<&str>) -> Result<Self, CandleError> {
-        let tokenizer = Self::load_tokenizer(tokenizer_path)?;
-        Self::new_with_tokenizer(tokenizer)
-    }
-
-    /// Create with a specific tokenizer
-    pub fn new_with_tokenizer(tokenizer: Tokenizer) -> Result<Self, CandleError> {
-        // Use tiny config for testing
-        let config = Config::tiny_15m();
-        let device = Device::Cpu;
-
-        // Create a simple VarBuilder with zeros for testing
-        let vb = VarBuilder::zeros(DType::F32, &device);
-
-        // Create cache
-        let cache = Cache::new(true, &config, vb.pp("rot"))?;
-
-        // Load model
-        let model = Llama::load(vb, config.clone())?;
-
-        // Initialize generation parameters
-        let seed = 299792458; // Speed of light for fun
-        let temperature = 0.8;
-        let top_p = Some(0.9);
-        let logits_processor = LogitsProcessor::new(seed, Some(temperature), top_p);
-
-        Ok(Self {
-            model,
-            config,
-            cache: RwLock::new(cache),
-            device,
-            tokenizer,
-            logits_processor: RwLock::new(logits_processor),
-            seed,
-            temperature,
-            top_p,
-        })
-    }
-
     /// Load tokenizer from local file or HuggingFace
     fn load_tokenizer(tokenizer_path: Option<&str>) -> Result<Tokenizer, CandleError> {
         use std::path::PathBuf;

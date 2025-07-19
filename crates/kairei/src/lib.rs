@@ -4,6 +4,7 @@
 //! abstractions for building LLM applications and agents.
 
 pub mod app;
+pub mod error;
 
 // Re-export core types
 pub use kairei_core::{
@@ -14,9 +15,12 @@ pub use kairei_core::{
 // Re-export app types
 pub use app::{AppMetadata, AppMode, KaireiApp, KaireiAppBuilder};
 
+// Re-export error types
+pub use error::{KaireiError, Result as KaireiResult};
+
 // Feature-gated re-exports
 #[cfg(feature = "candle")]
-pub use kairei_candle::Llama2CProcessor;
+pub use kairei_candle::{Llama2CProcessor, Llama2CProcessorBuilder};
 
 /// Prelude module for convenient imports
 pub mod prelude {

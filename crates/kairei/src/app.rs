@@ -3,7 +3,8 @@
 //! This module provides the high-level application framework for building
 //! LLM applications and agents with Kairei.
 
-use kairei_core::{Processor, Request, Response, Result as CoreResult};
+use crate::error::{KaireiError, Result};
+use kairei_core::{Processor, Request, Response};
 use std::sync::Arc;
 
 /// The main Kairei application
@@ -43,8 +44,11 @@ impl KaireiApp {
     }
 
     /// Process a request
-    pub async fn process(&self, request: Request) -> CoreResult<Response> {
-        self.processor.process(request).await
+    pub async fn process(&self, request: Request) -> Result<Response> {
+        self.processor
+            .process(request)
+            .await
+            .map_err(KaireiError::Core)
     }
 
     /// Get app metadata
@@ -108,8 +112,10 @@ impl KaireiAppBuilder {
     }
 
     /// Build the application
-    pub fn build(self) -> Result<KaireiApp, String> {
-        let processor = self.processor.ok_or("No processor configured")?;
+    pub fn build(self) -> Result<KaireiApp> {
+        let processor = self
+            .processor
+            .ok_or_else(|| KaireiError::Build("No processor configured".to_string()))?;
 
         let metadata = AppMetadata {
             name: self.name,
@@ -134,7 +140,7 @@ pub mod processors {
 
     #[async_trait]
     impl Processor for EchoProcessor {
-        async fn process(&self, request: Request) -> CoreResult<Response> {
+        async fn process(&self, request: Request) -> kairei_core::Result<Response> {
             Ok(Response::simple(
                 request.id.clone(),
                 format!("Echo: {}", request.message),

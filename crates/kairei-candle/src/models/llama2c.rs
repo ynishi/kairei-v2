@@ -12,8 +12,10 @@ pub use candle_transformers::models::llama2_c_weights::TransformerWeights;
 
 use candle_core::{D, DType, Device, IndexOp, Result, Tensor};
 use candle_nn::linear_no_bias as linear;
-use candle_nn::{Embedding, Linear, Module, RmsNorm, VarBuilder, embedding, rms_norm};
+use candle_nn::{Embedding, Module, RmsNorm, VarBuilder, embedding, rms_norm};
 use std::collections::HashMap;
+
+use crate::models::lora::LoraLinear;
 
 #[derive(Debug, Clone)]
 pub struct Cache {
@@ -78,10 +80,10 @@ fn silu(xs: &Tensor) -> Result<Tensor> {
 
 #[derive(Debug, Clone)]
 struct CausalSelfAttention {
-    q_proj: Linear,
-    k_proj: Linear,
-    v_proj: Linear,
-    o_proj: Linear,
+    q_proj: LoraLinear,
+    k_proj: LoraLinear,
+    v_proj: LoraLinear,
+    o_proj: LoraLinear,
     n_head: usize,
     n_key_value_head: usize,
     head_dim: usize,
@@ -172,10 +174,10 @@ impl CausalSelfAttention {
         let size_in = cfg.dim;
         let size_q = (cfg.dim / cfg.n_heads) * cfg.n_heads;
         let size_kv = (cfg.dim / cfg.n_heads) * cfg.n_kv_heads;
-        let q_proj = linear(size_in, size_q, vb.pp("q_proj"))?;
-        let k_proj = linear(size_in, size_kv, vb.pp("k_proj"))?;
-        let v_proj = linear(size_in, size_kv, vb.pp("v_proj"))?;
-        let o_proj = linear(size_q, size_in, vb.pp("o_proj"))?;
+        let q_proj = LoraLinear::from_linear(linear(size_in, size_q, vb.pp("q_proj"))?);
+        let k_proj = LoraLinear::from_linear(linear(size_in, size_kv, vb.pp("k_proj"))?);
+        let v_proj = LoraLinear::from_linear(linear(size_in, size_kv, vb.pp("v_proj"))?);
+        let o_proj = LoraLinear::from_linear(linear(size_q, size_in, vb.pp("o_proj"))?);
         Ok(Self {
             q_proj,
             k_proj,
@@ -197,13 +199,13 @@ fn masked_fill(on_false: &Tensor, mask: &Tensor, on_true: f32) -> Result<Tensor>
 
 #[derive(Debug, Clone)]
 struct Mlp {
-    c_fc1: Linear,
-    c_fc2: Linear,
-    c_proj: Linear,
+    c_fc1: LoraLinear,
+    c_fc2: LoraLinear,
+    c_proj: LoraLinear,
 }
 
 impl Mlp {
-    fn new(c_fc1: Linear, c_fc2: Linear, c_proj: Linear) -> Self {
+    fn new(c_fc1: LoraLinear, c_fc2: LoraLinear, c_proj: LoraLinear) -> Self {
         Self {
             c_fc1,
             c_fc2,
@@ -219,9 +221,9 @@ impl Mlp {
     fn load(vb: VarBuilder, cfg: &Config) -> Result<Self> {
         let h_size = cfg.dim;
         let i_size = cfg.hidden_dim;
-        let c_fc1 = linear(h_size, i_size, vb.pp("gate_proj"))?;
-        let c_fc2 = linear(h_size, i_size, vb.pp("up_proj"))?;
-        let c_proj = linear(i_size, h_size, vb.pp("down_proj"))?;
+        let c_fc1 = LoraLinear::from_linear(linear(h_size, i_size, vb.pp("gate_proj"))?);
+        let c_fc2 = LoraLinear::from_linear(linear(h_size, i_size, vb.pp("up_proj"))?);
+        let c_proj = LoraLinear::from_linear(linear(i_size, h_size, vb.pp("down_proj"))?);
         Ok(Self::new(c_fc1, c_fc2, c_proj))
     }
 }
@@ -279,7 +281,7 @@ pub struct Llama {
     wte: Embedding,
     blocks: Vec<Block>,
     ln_f: RmsNorm,
-    lm_head: Linear,
+    lm_head: LoraLinear,
     #[allow(dead_code)]
     pub config: Config,
 }
@@ -311,7 +313,7 @@ impl Llama {
 
     pub fn load(vb: VarBuilder, cfg: Config) -> Result<Self> {
         let wte = embedding(cfg.vocab_size, cfg.dim, vb.pp("model.embed_tokens"))?;
-        let lm_head = linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?;
+        let lm_head = LoraLinear::from_linear(linear(cfg.dim, cfg.vocab_size, vb.pp("lm_head"))?);
         let ln_f = rms_norm(cfg.dim, cfg.norm_eps, vb.pp("model.norm"))?;
         let blocks: Vec<_> = (0..cfg.n_layers)
             .map(|i| Block::load(vb.pp(format!("model.layers.{i}")), &cfg).unwrap())
@@ -323,5 +325,9 @@ impl Llama {
             lm_head,
             config: cfg,
         })
+    }
+
+    pub fn apply_lora(&mut self, lora_manager: &crate::models::lora::LoraManager) -> Result<()> {
+        todo!("apply_lora implementation")
     }
 }

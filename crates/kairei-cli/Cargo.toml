@@ -9,6 +9,7 @@ description = "CLI for Kairei-v2 AgentCulture Framework"
 
 [dependencies]
 kairei = { path = "../kairei", features = ["candle"] }
+kairei-candle = { path = "../kairei-candle" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"
