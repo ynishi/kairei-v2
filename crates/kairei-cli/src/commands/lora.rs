@@ -303,3 +303,28 @@ pub async fn lora_remove(name: &str, keep_file: bool) -> Result<(), CliError> {
 
     Ok(())
 }
+
+pub async fn convert_peft_to_candle_lora(
+    peft_dir: String,
+    output_path: String,
+    prefix: Option<String>,
+) -> Result<(), CliError> {
+    use candle_core::Device;
+    use candle_lora::convert_peft_dir_to_candle_lora_typed;
+
+    println!("🔄 Converting PEFT to candle-lora format...");
+
+    let device = Device::Cpu;
+    // Note: prefix is ignored in the typed conversion as it automatically determines prefixes
+    if prefix.is_some() {
+        println!(
+            "⚠️  Note: prefix parameter is ignored in typed conversion (auto-determined by layer type)"
+        );
+    }
+
+    // Use the new typed conversion function with dummy embeddings enabled
+    convert_peft_dir_to_candle_lora_typed(&peft_dir, &output_path, &device, true)
+        .map_err(|e| CliError::InvalidInput(format!("Conversion failed: {}", e)))?;
+
+    Ok(())
+}

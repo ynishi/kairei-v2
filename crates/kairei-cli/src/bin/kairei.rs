@@ -1,7 +1,7 @@
 //! CLI for Kairei-v2 AgentCulture Framework
 
 use clap::Parser;
-use kairei_cli::{commands, error::CliError};
+use kairei_cli::{ModelType, commands, error::CliError};
 
 #[derive(Parser)]
 #[command(name = "kairei")]
@@ -49,6 +49,20 @@ enum LoraCommands {
         #[arg(long)]
         keep_file: bool,
     },
+
+    /// Convert PEFT format to candle-lora format
+    Convert {
+        /// PEFT directory path (containing adapter_config.json and adapter_model.safetensors)
+        peft_dir: String,
+
+        /// Output safetensors file path
+        #[arg(long, short = 'o')]
+        output: String,
+
+        /// Prefix for the converted tensors (default: "lora_llama")
+        #[arg(long, short = 'p', default_value = "lora_llama")]
+        prefix: String,
+    },
 }
 
 #[derive(clap::Subcommand)]
@@ -74,6 +88,15 @@ enum Commands {
         /// Base model to use
         #[arg(long, short = 'b')]
         base_model: Option<String>,
+        /// Model type to use
+        #[arg(long, value_enum, default_value = "llama2c")]
+        model_type: ModelType,
+        /// Path to tokenizer file (defaults to auto-detect based on model)
+        #[arg(long, short = 't')]
+        tokenizer: Option<String>,
+        /// Maximum number of tokens to generate
+        #[arg(long, default_value = "100")]
+        max_tokens: usize,
     },
     /// Setup models and dependencies
     Setup {
@@ -91,6 +114,52 @@ enum Commands {
     Lora {
         #[command(subcommand)]
         command: Option<LoraCommands>,
+    },
+    /// Train a LoRA model
+    Train {
+        /// Path to training data JSON file
+        #[arg(
+            long,
+            short = 'd',
+            default_value = "training/data/dialogue_dataset.json"
+        )]
+        train_data: String,
+
+        /// Number of training epochs (recommended: 10+ for meaningful results)
+        #[arg(long, short = 'e', default_value = "10")]
+        epochs: u32,
+
+        /// LoRA rank (recommended: 8-16 for better learning)
+        #[arg(long, default_value = "8")]
+        lora_r: u32,
+
+        /// LoRA alpha (typically 2x rank)
+        #[arg(long, default_value = "16")]
+        lora_alpha: u32,
+
+        /// Output directory for trained model
+        #[arg(long, short = 'o', default_value = "./lora_output")]
+        output_dir: String,
+
+        /// Model ID from HuggingFace
+        #[arg(
+            long,
+            short = 'm',
+            default_value = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+        )]
+        model: String,
+
+        /// Batch size per device
+        #[arg(long, default_value = "1")]
+        batch_size: u32,
+
+        /// Learning rate
+        #[arg(long, default_value = "5e-4")]
+        learning_rate: f32,
+
+        /// Run test after training
+        #[arg(long)]
+        test: bool,
     },
 }
 
@@ -111,6 +180,9 @@ async fn main() -> Result<(), CliError> {
             candle,
             lora,
             base_model,
+            model_type,
+            tokenizer,
+            max_tokens,
         }) => {
             commands::run_chat(
                 message.clone(),
@@ -118,6 +190,9 @@ async fn main() -> Result<(), CliError> {
                 *candle,
                 lora.clone(),
                 base_model.clone(),
+                *model_type,
+                tokenizer.clone(),
+                *max_tokens,
             )
             .await?;
         }
@@ -148,12 +223,48 @@ async fn main() -> Result<(), CliError> {
             Some(LoraCommands::Remove { name, keep_file }) => {
                 commands::lora_remove(name, *keep_file).await?;
             }
+            Some(LoraCommands::Convert {
+                peft_dir,
+                output,
+                prefix,
+            }) => {
+                commands::convert_peft_to_candle_lora(
+                    peft_dir.clone(),
+                    output.clone(),
+                    Some(prefix.clone()),
+                )
+                .await?;
+            }
             None => {
                 // Show help when no subcommand is provided
                 println!("LoRA model management commands\n");
                 println!("Use --help for more information");
             }
         },
+        Some(Commands::Train {
+            train_data,
+            epochs,
+            lora_r,
+            lora_alpha,
+            output_dir,
+            model,
+            batch_size,
+            learning_rate,
+            test,
+        }) => {
+            commands::run_train(
+                train_data.clone(),
+                *epochs,
+                *lora_r,
+                *lora_alpha,
+                output_dir.clone(),
+                model.clone(),
+                *batch_size,
+                *learning_rate,
+                *test,
+            )
+            .await?;
+        }
         None => {
             println!("Kairei-v2 AgentCulture Framework");
             println!("Use --help for more information");

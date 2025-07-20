@@ -44,6 +44,13 @@ impl Model {
             repo_id: "hf-internal-testing/llama-tokenizer",
             size_mb: 2,
         },
+        Model {
+            name: "tinyllama",
+            filename: "tinyllama/model.safetensors",
+            description: "TinyLlama 1.1B Chat model",
+            repo_id: "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            size_mb: 2200,
+        },
     ];
 
     fn find(name: &str) -> Option<&'static Model> {
