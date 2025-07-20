@@ -478,16 +478,26 @@ impl Processor for ManualLlama2LoraProcessor {
         println!("🚀 ManualLlama2LoraProcessor.process called!");
         println!("  Input message: {}", request.message);
         
-        // For now, return a simple response
-        // Full implementation would:
-        // 1. Tokenize the input
-        // 2. Run forward pass with proper generation loop
-        // 3. Decode the output tokens
+        // Simple test to verify LoRA is loaded
+        if self.model.lora_weights.is_empty() {
+            println!("  ⚠️  No LoRA weights loaded");
+        } else {
+            println!("  ✅ LoRA weights loaded for {} layers", self.model.lora_weights.len());
+            
+            // Print loaded LoRA layers
+            for (name, (a, b, scale)) in &self.model.lora_weights {
+                println!("    - {} (rank={}, scale={:.4})", name, a.dim(1).unwrap_or(0), scale);
+            }
+        }
         
-        Ok(Response::simple(
-            request.id,
-            "Manual LoRA processor initialized but generation not yet implemented!".to_string(),
-        ))
+        // For now, return a simple response showing LoRA status
+        let response_text = if self.model.lora_weights.is_empty() {
+            "Manual LoRA processor initialized (no LoRA weights loaded)".to_string()
+        } else {
+            format!("Manual LoRA processor initialized with {} LoRA layers!", self.model.lora_weights.len())
+        };
+        
+        Ok(Response::simple(request.id, response_text))
     }
 
     fn metadata(&self) -> ProcessorMetadata {
