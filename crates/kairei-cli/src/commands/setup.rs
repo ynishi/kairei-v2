@@ -1,9 +1,25 @@
 //! Setup command handler
 
 use crate::error::CliError;
+use chrono::Utc;
+use hf_hub::api::tokio::Api;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
-use tokio::process::Command;
+
+/// Model metadata stored as meta.toml in each model directory
+#[derive(Debug, Serialize, Deserialize)]
+struct ModelMetadata {
+    name: String,
+    repo_id: String,
+    model_type: Option<String>,
+    description: Option<String>,
+    downloaded_at: String,
+    // Model specific params
+    parameters: Option<String>,   // e.g., "1.1B", "7B", etc.
+    architecture: Option<String>, // e.g., "llama", "mistral", etc.
+    quantization: Option<String>, // e.g., "f16", "int8", etc.
+}
 
 /// Model information
 struct Model {
@@ -58,7 +74,13 @@ impl Model {
     }
 }
 
-pub async fn run_setup(list: bool, model: Option<String>, force: bool) -> Result<(), CliError> {
+pub async fn run_setup(
+    list: bool,
+    model: Option<String>,
+    force: bool,
+    name: Option<String>,
+    repo_id: Option<String>,
+) -> Result<(), CliError> {
     if list {
         list_models();
         return Ok(());
@@ -75,6 +97,30 @@ pub async fn run_setup(list: bool, model: Option<String>, force: bool) -> Result
                 CliError::InvalidInput(format!("Failed to create {} directory: {}", dir, e))
             })?;
         }
+    }
+
+    // Check if this is a custom model download
+    if let (Some(custom_name), Some(custom_repo)) = (name, repo_id) {
+        // Download custom HuggingFace model
+        println!(
+            "\n🤖 Downloading custom model: {} from {}",
+            custom_name, custom_repo
+        );
+
+        let model_dir = Path::new("models").join(&custom_name);
+        if model_dir.exists() && !force {
+            println!(
+                "✅ {} already exists (use --force to re-download)",
+                custom_name
+            );
+            return Ok(());
+        }
+
+        download_custom_model(&custom_name, &custom_repo, &model_dir).await?;
+
+        println!("✅ Downloaded {} successfully!", custom_name);
+        println!("\n🎉 Setup complete! You can now use your custom model.");
+        return Ok(());
     }
 
     // Determine which models to download
@@ -142,96 +188,170 @@ fn list_models() {
 }
 
 async fn download_model(model: &Model, target_path: &Path) -> Result<(), CliError> {
-    // Check if Python and required packages are available
-    check_python_deps().await?;
-
-    // Use Python script to download with progress
-    let python_script = format!(
-        r#"
-import sys
-import os
-from huggingface_hub import hf_hub_download
-
-try:
-    print("Connecting to HuggingFace Hub...")
-    file_path = hf_hub_download(
-        repo_id='{}',
-        filename='{}',
-        cache_dir='./temp/hf_cache'
-    )
-    
-    # Copy to target location
-    import shutil
-    os.makedirs(os.path.dirname('{}'), exist_ok=True)
-    shutil.copy2(file_path, '{}')
-    
-except Exception as e:
-    print(f"Error: {{e}}", file=sys.stderr)
-    sys.exit(1)
-"#,
-        model.repo_id,
-        model.filename,
-        target_path.display(),
-        target_path.display()
-    );
-
-    let output = Command::new("python3")
-        .arg("-c")
-        .arg(&python_script)
-        .output()
-        .await
-        .map_err(|e| CliError::InvalidInput(format!("Failed to run Python: {}", e)))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::InvalidInput(format!(
-            "Download failed: {}",
-            stderr
-        )));
+    // Create parent directory if needed
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| CliError::InvalidInput(format!("Failed to create directory: {}", e)))?;
     }
+
+    // Use hf-hub to download the file
+    let api = Api::new().map_err(|e| {
+        CliError::InvalidInput(format!("Failed to create HuggingFace API client: {}", e))
+    })?;
+
+    let repo = api.model(model.repo_id.to_string());
+
+    println!("Connecting to HuggingFace Hub...");
+
+    let downloaded_path = repo
+        .download(model.filename)
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Download failed: {}", e)))?;
+
+    // Copy to target location
+    fs::copy(&downloaded_path, target_path)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to copy file: {}", e)))?;
 
     Ok(())
 }
 
-async fn check_python_deps() -> Result<(), CliError> {
-    // Check if Python is available
-    let python_check = Command::new("python3").arg("--version").output().await;
+async fn download_custom_model(
+    _name: &str,
+    repo_id: &str,
+    target_dir: &Path,
+) -> Result<(), CliError> {
+    // Create target directory
+    fs::create_dir_all(target_dir)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to create directory: {}", e)))?;
 
-    if python_check.is_err() {
+    // Use hf-hub to download model files
+    let api = Api::new().map_err(|e| {
+        CliError::InvalidInput(format!("Failed to create HuggingFace API client: {}", e))
+    })?;
+
+    let repo = api.model(repo_id.to_string());
+
+    println!("📥 Downloading model files from {}...", repo_id);
+
+    // List and download important model files
+    let model_patterns = ["*.safetensors",
+        "*.bin",
+        "*.gguf",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "tokenizer.model",
+        "config.json"];
+
+    let info = repo
+        .info()
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Failed to get repo info: {}", e)))?;
+
+    let mut downloaded_files = 0;
+
+    for sibling in &info.siblings {
+        let filename = &sibling.rfilename;
+
+        // Check if file matches our patterns
+        let should_download = model_patterns.iter().any(|pattern| {
+            if pattern.starts_with("*.") {
+                filename.ends_with(&pattern[1..])
+            } else {
+                filename == pattern
+            }
+        });
+
+        if should_download {
+            println!("  Downloading {}...", filename);
+
+            let downloaded_path = repo.download(filename).await.map_err(|e| {
+                CliError::InvalidInput(format!("Failed to download {}: {}", filename, e))
+            })?;
+
+            let target_path = target_dir.join(filename);
+
+            // Create parent directories if needed
+            if let Some(parent) = target_path.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    CliError::InvalidInput(format!("Failed to create directory: {}", e))
+                })?;
+            }
+
+            fs::copy(&downloaded_path, &target_path)
+                .map_err(|e| CliError::InvalidInput(format!("Failed to copy file: {}", e)))?;
+
+            downloaded_files += 1;
+        }
+    }
+
+    if downloaded_files == 0 {
         return Err(CliError::InvalidInput(
-            "Python 3 is required for downloading models. Please install Python 3.".to_string(),
+            "No model files found in the repository".to_string(),
         ));
     }
 
-    // Check if huggingface_hub is installed
-    let hf_check = Command::new("python3")
-        .arg("-c")
-        .arg("import huggingface_hub")
-        .output()
-        .await
-        .map_err(|e| CliError::InvalidInput(format!("Failed to check Python packages: {}", e)))?;
+    println!("✅ Downloaded {} files successfully!", downloaded_files);
 
-    if !hf_check.status.success() {
-        println!("⚠️  huggingface_hub is not installed. Installing...");
+    // Try to read config.json to get model information
+    let mut model_type = None;
+    let mut architecture = None;
+    let mut parameters = None;
 
-        let install_output = Command::new("pip3")
-            .arg("install")
-            .arg("huggingface_hub")
-            .output()
-            .await
-            .map_err(|e| {
-                CliError::InvalidInput(format!("Failed to install huggingface_hub: {}", e))
-            })?;
+    let config_path = target_dir.join("config.json");
+    if config_path.exists() {
+        if let Ok(config_content) = fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_content) {
+                // Extract model type
+                if let Some(model_type_value) = config.get("model_type") {
+                    model_type = model_type_value.as_str().map(|s| s.to_string());
+                }
 
-        if !install_output.status.success() {
-            return Err(CliError::InvalidInput(
-                "Failed to install huggingface_hub. Please run: pip3 install huggingface_hub"
-                    .to_string(),
-            ));
+                // Extract architecture info
+                if let Some(arch_value) = config.get("architectures") {
+                    if let Some(arch_array) = arch_value.as_array() {
+                        if let Some(first_arch) = arch_array.first() {
+                            architecture = first_arch.as_str().map(|s| s.to_string());
+                        }
+                    }
+                }
+
+                // Try to estimate model size from parameters
+                if let Some(hidden_size) = config.get("hidden_size").and_then(|v| v.as_u64()) {
+                    if let Some(num_layers) =
+                        config.get("num_hidden_layers").and_then(|v| v.as_u64())
+                    {
+                        let approx_params = (hidden_size * num_layers * 4) / 1_000_000; // Very rough estimate
+                        if approx_params < 1000 {
+                            parameters = Some(format!("~{}M", approx_params));
+                        } else {
+                            parameters = Some(format!("~{:.1}B", approx_params as f64 / 1000.0));
+                        }
+                    }
+                }
+            }
         }
-
-        println!("✅ huggingface_hub installed successfully!");
     }
+
+    // Create metadata file
+    let metadata = ModelMetadata {
+        name: _name.to_string(),
+        repo_id: repo_id.to_string(),
+        model_type,
+        description: Some(format!("Downloaded from HuggingFace: {}", repo_id)),
+        downloaded_at: Utc::now().to_rfc3339(),
+        parameters,
+        architecture,
+        quantization: None,
+    };
+
+    let meta_path = target_dir.join("meta.toml");
+    let toml_string = toml::to_string_pretty(&metadata)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
+
+    fs::write(&meta_path, toml_string)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to write metadata file: {}", e)))?;
+
+    println!("📝 Created metadata file: meta.toml");
 
     Ok(())
 }

@@ -109,6 +109,12 @@ enum Commands {
         /// Force re-download even if file exists
         #[arg(long, short)]
         force: bool,
+        /// Custom name for the model (used with HuggingFace repo ID)
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+        /// HuggingFace repository ID (e.g., meta-llama/Llama-3.2-1B)
+        #[arg(value_name = "REPO_ID")]
+        repo_id: Option<String>,
     },
     /// LoRA culture management
     Lora {
@@ -196,8 +202,15 @@ async fn main() -> Result<(), CliError> {
             )
             .await?;
         }
-        Some(Commands::Setup { list, model, force }) => {
-            commands::run_setup(*list, model.clone(), *force).await?;
+        Some(Commands::Setup {
+            list,
+            model,
+            force,
+            name,
+            repo_id,
+        }) => {
+            commands::run_setup(*list, model.clone(), *force, name.clone(), repo_id.clone())
+                .await?;
         }
         Some(Commands::Lora { command }) => match command {
             Some(LoraCommands::Add {
