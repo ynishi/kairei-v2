@@ -234,13 +234,15 @@ async fn download_custom_model(
     println!("📥 Downloading model files from {}...", repo_id);
 
     // List and download important model files
-    let model_patterns = ["*.safetensors",
+    let model_patterns = [
+        "*.safetensors",
         "*.bin",
         "*.gguf",
         "tokenizer.json",
         "tokenizer_config.json",
         "tokenizer.model",
-        "config.json"];
+        "config.json",
+    ];
 
     let info = repo
         .info()
