@@ -11,10 +11,9 @@ use tokenizers::Tokenizer;
 
 use crate::CandleError;
 use candle_lora::{LinearLayerLike, LoraConfig};
-use candle_nn::{Module, linear_no_bias as linear, Embedding};
-use std::sync::{Arc, Mutex};
-use std::f32::consts::PI;
+use candle_nn::{Embedding, Module, linear_no_bias as linear};
 use candle_transformers::generation::LogitsProcessor;
+use std::f32::consts::PI;
 use std::io::Write;
 
 /// Llama3 specific RoPE configuration
@@ -183,17 +182,17 @@ impl CausalSelfAttention {
             max_position_embeddings,
         }
     }
-    
+
     fn load(vb: VarBuilder, cfg: &Config) -> Result<Self, CandleError> {
         let size_in = cfg.hidden_size;
         let size_q = (cfg.hidden_size / cfg.num_attention_heads) * cfg.num_attention_heads;
         let size_kv = (cfg.hidden_size / cfg.num_attention_heads) * cfg.num_key_value_heads;
-        
+
         let q_proj = Box::new(linear(size_in, size_q, vb.pp("q_proj"))?) as DynLinear;
         let k_proj = Box::new(linear(size_in, size_kv, vb.pp("k_proj"))?) as DynLinear;
         let v_proj = Box::new(linear(size_in, size_kv, vb.pp("v_proj"))?) as DynLinear;
         let o_proj = Box::new(linear(size_q, size_in, vb.pp("o_proj"))?) as DynLinear;
-        
+
         Ok(Self::new(
             q_proj,
             k_proj,
@@ -205,7 +204,7 @@ impl CausalSelfAttention {
             cfg.max_position_embeddings,
         ))
     }
-    
+
     fn forward(
         &self,
         x: &Tensor,
@@ -272,9 +271,9 @@ impl CausalSelfAttention {
         let q = q.to_dtype(DType::F32)?;
         let k = k.to_dtype(DType::F32)?;
         let v = v.to_dtype(DType::F32)?;
-        
+
         let att = (q.matmul(&k.t()?)? / (self.head_dim as f64).sqrt())?;
-        
+
         // Apply causal mask
         let att = if seq_len == 1 {
             att
@@ -283,16 +282,16 @@ impl CausalSelfAttention {
             let mask = mask.broadcast_as(att.shape())?;
             masked_fill(&att, &mask, f32::NEG_INFINITY)?
         };
-        
+
         let att = candle_nn::ops::softmax(&att, D::Minus1)?;
         let att_output = att.matmul(&v.contiguous()?)?.to_dtype(in_dtype)?;
-        
+
         let y = att_output
             .transpose(1, 2)?
             .reshape((b_sz, seq_len, hidden_size))?;
         self.o_proj.forward(&y).map_err(CandleError::from)
     }
-    
+
     fn apply_rotary_emb(
         &self,
         x: &Tensor,
@@ -304,7 +303,7 @@ impl CausalSelfAttention {
         let sin = cache.sin.narrow(0, index_pos, seq_len)?;
         Ok(candle_nn::rotary_emb::rope(x, &cos, &sin)?)
     }
-    
+
     fn repeat_kv(&self, x: Tensor) -> Result<Tensor, CandleError> {
         let n_rep = self.num_attention_heads / self.num_key_value_heads;
         if n_rep == 1 {
@@ -318,7 +317,7 @@ impl CausalSelfAttention {
             Ok(x)
         }
     }
-    
+
     fn create_causal_mask(&self, seq_len: usize) -> Result<Tensor, CandleError> {
         let mask: Vec<_> = (0..seq_len)
             .flat_map(|i| (0..seq_len).map(move |j| u8::from(j > i)))
@@ -342,7 +341,7 @@ impl Mlp {
             down_proj,
         }
     }
-    
+
     fn load(vb: VarBuilder, cfg: &Config) -> Result<Self, CandleError> {
         let h_size = cfg.hidden_size;
         let i_size = cfg.intermediate_size;
@@ -351,7 +350,7 @@ impl Mlp {
         let down_proj = Box::new(linear(i_size, h_size, vb.pp("down_proj"))?) as DynLinear;
         Ok(Self::new(gate_proj, up_proj, down_proj))
     }
-    
+
     fn forward(&self, x: &Tensor) -> Result<Tensor, CandleError> {
         let x = (silu(&self.gate_proj.forward(x)?)? * self.up_proj.forward(x)?)?;
         self.down_proj.forward(&x).map_err(CandleError::from)
@@ -380,18 +379,22 @@ impl Block {
             mlp,
         }
     }
-    
+
     fn load(vb: VarBuilder, cache: &Cache, cfg: &Config) -> Result<Self, CandleError> {
         use candle_nn::rms_norm;
-        
+
         let rms_1 = rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("input_layernorm"))?;
-        let rms_2 = rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("post_attention_layernorm"))?;
+        let rms_2 = rms_norm(
+            cfg.hidden_size,
+            cfg.rms_norm_eps,
+            vb.pp("post_attention_layernorm"),
+        )?;
         let attn = CausalSelfAttention::load(vb.pp("self_attn"), cfg)?;
         let mlp = Mlp::load(vb.pp("mlp"), cfg)?;
-        
+
         Ok(Self::new(rms_1, attn, rms_2, mlp))
     }
-    
+
     fn forward(
         &self,
         x: &Tensor,
@@ -426,15 +429,15 @@ impl Llama3WithLora {
         dtype: DType,
     ) -> Result<Self, CandleError> {
         use candle_nn::{embedding, rms_norm};
-        
+
         println!("🔨 Loading Llama3 model...");
-        
+
         // Load embeddings
         let wte = embedding(cfg.vocab_size, cfg.hidden_size, vb.pp("model.embed_tokens"))?;
-        
+
         // Initialize cache
         let cache = Cache::new(true, dtype, cfg, device)?;
-        
+
         // Load blocks
         let mut blocks = Vec::with_capacity(cfg.num_hidden_layers);
         for idx in 0..cfg.num_hidden_layers {
@@ -442,10 +445,10 @@ impl Llama3WithLora {
             let block = Block::load(vb.pp(format!("model.layers.{}", idx)), &cache, cfg)?;
             blocks.push(block);
         }
-        
+
         // Load final norm and head
         let ln_f = rms_norm(cfg.hidden_size, cfg.rms_norm_eps, vb.pp("model.norm"))?;
-        
+
         // Handle tie_word_embeddings
         let lm_head = if cfg.tie_word_embeddings {
             // Reuse embedding weights
@@ -454,9 +457,9 @@ impl Llama3WithLora {
         } else {
             Box::new(linear(cfg.hidden_size, cfg.vocab_size, vb.pp("lm_head"))?) as DynLinear
         };
-        
+
         println!("✅ Model loaded successfully");
-        
+
         Ok(Self {
             wte,
             blocks,
@@ -466,55 +469,55 @@ impl Llama3WithLora {
             lora_weights: HashMap::new(),
         })
     }
-    
+
     pub fn apply_lora_weights(
         &mut self,
         lora_weights: HashMap<String, (Tensor, Tensor)>,
         _lora_config: &LoraConfig,
     ) -> Result<(), CandleError> {
         println!("🎯 Storing LoRA weights for {} layers", lora_weights.len());
-        
+
         for (name, (lora_a, lora_b)) in lora_weights {
             println!("  Processing LoRA weights for: {}", name);
-            
+
             let a_shape = lora_a.shape();
             let b_shape = lora_b.shape();
             println!("    - lora_a shape: {:?}", a_shape);
             println!("    - lora_b shape: {:?}", b_shape);
-            
+
             let rank = lora_a.dim(0)?;
-            
+
             if rank > 64 {
                 println!("    ⚠️  Warning: rank={} seems too high for LoRA!", rank);
             }
-            
+
             let alpha = 32.0;
             let scale = alpha / rank as f64;
-            
+
             self.lora_weights
                 .insert(name.clone(), (lora_a, lora_b, scale));
             println!("    ✓ Stored with rank={}, scale={:.4}", rank, scale);
         }
-        
+
         println!("✅ LoRA weights stored successfully");
         Ok(())
     }
-    
+
     pub fn forward(&mut self, input_ids: &Tensor, index_pos: usize) -> Result<Tensor, CandleError> {
         let (_b_sz, _seq_len) = input_ids.dims2()?;
-        
+
         // Embedding
         let mut x = self.wte.forward(input_ids)?;
-        
+
         // Pass through all blocks
         for (block_idx, block) in self.blocks.iter().enumerate() {
             x = block.forward(&x, index_pos, block_idx, &mut self.cache)?;
         }
-        
+
         // Final norm and head
         let x = self.ln_f.forward(&x)?;
         let logits = self.lm_head.forward(&x)?;
-        
+
         Ok(logits)
     }
 }
@@ -538,28 +541,28 @@ impl Llama3LoraProcessor {
         max_tokens: usize,
     ) -> Result<Self, CandleError> {
         println!("🚀 Initializing Llama3 LoRA Processor...");
-        
+
         // Load tokenizer
         println!("📖 Loading tokenizer from: {}", tokenizer_path);
         let tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| CandleError::Other(format!("Failed to load tokenizer: {}", e)))?;
-        
+
         // Load model weights
         println!("🏗️ Loading model weights from: {}", model_path);
         let tensors = candle_core::safetensors::load(model_path, &device)?;
         let vb = VarBuilder::from_tensors(tensors, dtype, &device);
-        
+
         // Load model
         let mut model = Llama3WithLora::load(vb, &config, &device, dtype)?;
-        
+
         // Apply LoRA weights if provided
         if let Some(lora_path) = lora_path {
             println!("🎯 Loading LoRA weights from: {}", lora_path);
             let lora_tensors = candle_core::safetensors::load(lora_path, &device)?;
-            
+
             let mut lora_weights = HashMap::new();
             let lora_config = LoraConfig::new(16, 32.0, Some(0.0));
-            
+
             // Extract LoRA A/B pairs (same pattern matching as Llama2)
             println!("📋 LoRA file contains {} tensors:", lora_tensors.len());
             for (i, (name, _)) in lora_tensors.iter().enumerate() {
@@ -567,24 +570,24 @@ impl Llama3LoraProcessor {
                     println!("   - {}", name);
                 }
             }
-            
+
             // Process LoRA weights
             for (name, tensor) in lora_tensors.iter() {
                 if name.contains(".lora_a.") {
                     let base_name = name.replace(".lora_a.weight", "");
                     let b_name = name.replace(".lora_a.", ".lora_b.");
-                    
+
                     if let Some(b_tensor) = lora_tensors.get(&b_name) {
                         println!("   Found LoRA pair: {}", base_name);
                         lora_weights.insert(base_name, (tensor.clone(), b_tensor.clone()));
                     }
                 }
             }
-            
+
             println!("✅ Loaded {} LoRA weight pairs", lora_weights.len());
             model.apply_lora_weights(lora_weights, &lora_config)?;
         }
-        
+
         Ok(Self {
             model: std::sync::Mutex::new(model),
             tokenizer,
@@ -598,93 +601,122 @@ impl Llama3LoraProcessor {
 impl Processor for Llama3LoraProcessor {
     async fn process(&self, request: Request) -> CoreResult<Response> {
         use kairei_core::CoreError;
-        
+
         println!("🚀 Llama3LoraProcessor.process called!");
         println!("  Input message: {}", request.message);
-        
+
         // Get mutable access to the model
         let mut model = self.model.lock().unwrap();
-        
+
         // Log LoRA status
         if model.lora_weights.is_empty() {
             println!("  ⚠️  No LoRA weights loaded");
         } else {
-            println!("  ✅ LoRA weights loaded for {} layers", model.lora_weights.len());
+            println!(
+                "  ✅ LoRA weights loaded for {} layers",
+                model.lora_weights.len()
+            );
         }
-        
+
         // Tokenize input
         let tokens = match self.tokenizer.encode(request.message.as_str(), true) {
             Ok(t) => t,
             Err(e) => return Err(CoreError::Processing(format!("Tokenization error: {}", e))),
         };
-        
+
         let input_ids = tokens.get_ids();
-        println!("  📝 Input tokens: {:?} (length: {})",
+        println!(
+            "  📝 Input tokens: {:?} (length: {})",
             &input_ids[..input_ids.len().min(10)],
             input_ids.len()
         );
-        
+
         // Convert to tensor
         let input_tensor = match Tensor::new(input_ids, &self.device) {
             Ok(t) => match t.unsqueeze(0) {
                 Ok(t) => t,
                 Err(e) => return Err(CoreError::Processing(format!("Unsqueeze error: {}", e))),
             },
-            Err(e) => return Err(CoreError::Processing(format!("Tensor creation error: {}", e))),
+            Err(e) => {
+                return Err(CoreError::Processing(format!(
+                    "Tensor creation error: {}",
+                    e
+                )));
+            }
         };
-        
+
         // Text generation
         let mut generated_tokens = Vec::new();
         let mut all_tokens = input_ids.to_vec();
         let mut index_pos = 0;
-        
+
         // Setup LogitsProcessor for sampling
         let mut logits_processor = LogitsProcessor::new(42, None, None);
-        
-        println!("  🎯 Starting generation (max {} tokens)...", self.max_tokens);
-        
+
+        println!(
+            "  🎯 Starting generation (max {} tokens)...",
+            self.max_tokens
+        );
+
         for i in 0..self.max_tokens {
             // Context size management
             let context_size = if i > 0 { 1 } else { all_tokens.len() };
             let start_idx = all_tokens.len().saturating_sub(context_size);
             let ctxt: Vec<u32> = all_tokens[start_idx..].to_vec();
-            
+
             // Forward pass
             let current_input = match Tensor::new(ctxt.as_slice(), &self.device) {
                 Ok(t) => match t.unsqueeze(0) {
                     Ok(t) => t,
-                    Err(e) => return Err(CoreError::Processing(format!("Input tensor error: {}", e))),
+                    Err(e) => {
+                        return Err(CoreError::Processing(format!("Input tensor error: {}", e)));
+                    }
                 },
-                Err(e) => return Err(CoreError::Processing(format!("Tensor creation error: {}", e))),
+                Err(e) => {
+                    return Err(CoreError::Processing(format!(
+                        "Tensor creation error: {}",
+                        e
+                    )));
+                }
             };
-            
+
             let logits = match model.forward(&current_input, index_pos) {
                 Ok(l) => l,
-                Err(e) => return Err(CoreError::Processing(format!("Forward pass error at step {}: {}", i, e))),
+                Err(e) => {
+                    return Err(CoreError::Processing(format!(
+                        "Forward pass error at step {}: {}",
+                        i, e
+                    )));
+                }
             };
-            
+
             // Get logits for the last token
             let next_token_logits = match logits.i((0, logits.dim(1).unwrap() - 1)) {
                 Ok(l) => l,
-                Err(e) => return Err(CoreError::Processing(format!("Logits indexing error: {}", e))),
+                Err(e) => {
+                    return Err(CoreError::Processing(format!(
+                        "Logits indexing error: {}",
+                        e
+                    )));
+                }
             };
-            
+
             // Sample next token
             let next_token = match logits_processor.sample(&next_token_logits) {
                 Ok(token) => token,
                 Err(e) => return Err(CoreError::Processing(format!("Sampling error: {}", e))),
             };
-            
+
             generated_tokens.push(next_token);
             all_tokens.push(next_token);
-            
+
             // Check for EOS token
             let eos_token = 2u32; // Common EOS token for Llama models
             if next_token == eos_token {
                 println!("  🛑 EOS token generated at position {}", i);
                 break;
             }
-            
+
             // Decode and print token for streaming output
             if let Ok(token_str) = self.tokenizer.decode(&[next_token], false) {
                 if !token_str.trim().is_empty() {
@@ -692,9 +724,9 @@ impl Processor for Llama3LoraProcessor {
                     std::io::stdout().flush().ok();
                 }
             }
-            
+
             index_pos += ctxt.len();
-            
+
             // Progress indicator
             if i % 20 == 0 && i > 0 {
                 print!(".");
@@ -702,15 +734,20 @@ impl Processor for Llama3LoraProcessor {
             }
         }
         println!(); // New line after generation
-        
+
         println!("  ✅ Generated {} tokens", generated_tokens.len());
-        
+
         // Decode generated tokens
         let response_text = match self.tokenizer.decode(&generated_tokens, true) {
             Ok(text) => text,
-            Err(e) => return Err(CoreError::Processing(format!("Token decoding error: {}", e))),
+            Err(e) => {
+                return Err(CoreError::Processing(format!(
+                    "Token decoding error: {}",
+                    e
+                )));
+            }
         };
-        
+
         Ok(Response::simple(request.id, response_text))
     }
 
