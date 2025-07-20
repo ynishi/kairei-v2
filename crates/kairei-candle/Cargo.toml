@@ -9,11 +9,12 @@ description = "Candle integration for Kairei-v2 AgentCulture Framework"
 
 [dependencies]
 async-trait = "0.1"
-candle-core = "0.9"
-candle-nn = "0.9"
-candle-transformers = "0.9"
+candle-core = { git = "https://github.com/huggingface/candle.git" }
+candle-nn = { git = "https://github.com/huggingface/candle.git" }
+candle-transformers = { git = "https://github.com/huggingface/candle.git" }
 candle-lora = { git = "https://github.com/ynishi/candle-lora.git" }
 candle-lora-macro = { git = "https://github.com/ynishi/candle-lora.git" }
+candle-lora-transformers = { git = "https://github.com/ynishi/candle-lora.git" }
 hf-hub = { version = "0.3", features = ["tokio"] }
 kairei-core = { path = "../kairei-core" }
 rand = "0.8"
