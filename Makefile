@@ -78,3 +78,17 @@ eval-quick:
 
 # All evaluation tasks
 eval: eval-fmt eval-test
+
+# ========== LoRA Commands ==========
+
+# Convert PEFT to candle-lora format
+lora-convert:
+	cargo run --bin kairei -- lora convert ./training/test_lora_output/final_model -o ./test_converted.safetensors
+
+# Test LoRA chat with TinyLlama
+lora-chat:
+	cargo run --bin kairei -- chat --candle --model-type llama2 --lora test_rust_trained --base-model models/tinyllama/model.safetensors --tokenizer models/tokenizer.json --once --message "What is LoRA fine-tuning?" --max-tokens 100
+
+# Test without LoRA (base model only)
+base-chat:
+	cargo run --bin kairei -- chat --candle --model-type llama2 --base-model models/tinyllama/model.safetensors --tokenizer models/tokenizer.json --once --message "What is LoRA fine-tuning?"
