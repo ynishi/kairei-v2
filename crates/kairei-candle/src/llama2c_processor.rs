@@ -278,7 +278,7 @@ impl Llama2CProcessorBuilder {
     fn apply_lora(&self, processor: &mut Llama2CProcessor) -> Result<(), CandleError> {
         println!("📎 Applying {} LoRA adapter(s)...", self.lora_paths.len());
 
-        let lora_config = LoraConfig::default();
+        let lora_config = LoraConfig::llama_default();
         let mut lora_manager = LoraManager::new(lora_config);
 
         for (idx, lora_path) in self.lora_paths.iter().enumerate() {
@@ -287,7 +287,50 @@ impl Llama2CProcessorBuilder {
                 idx + 1,
                 lora_path.display()
             );
-            lora_manager.load_from_safetensors(lora_path.to_str().unwrap(), &processor.device)?;
+
+            // Check if this is a directory or a file
+            if lora_path.is_dir() {
+                // Directory - check for PEFT format
+                let adapter_config = lora_path.join("adapter_config.json");
+                let adapter_weights = lora_path
+                    .join("adapter_model.safetensors")
+                    .exists()
+                    .then_some(lora_path.join("adapter_model.safetensors"))
+                    .or_else(|| {
+                        lora_path
+                            .join("adapter.safetensors")
+                            .exists()
+                            .then_some(lora_path.join("adapter.safetensors"))
+                    });
+
+                if adapter_config.exists() || adapter_weights.is_some() {
+                    println!("   📚 Detected PEFT directory format, using PEFT directory loader");
+                    lora_manager
+                        .load_from_peft_dir(lora_path.to_str().unwrap(), &processor.device)?;
+                } else {
+                    return Err(CandleError::Candle(candle_core::Error::Msg(format!(
+                        "Directory {} does not contain PEFT LoRA files (adapter_config.json or adapter*.safetensors)",
+                        lora_path.display()
+                    ))));
+                }
+            } else {
+                // File - check if this is a PEFT format file by looking at tensor names
+                let is_peft = {
+                    let tensors = candle_core::safetensors::load(
+                        lora_path.to_str().unwrap(),
+                        &processor.device,
+                    )?;
+                    tensors.keys().any(|k| k.starts_with("base_model.model"))
+                };
+
+                if is_peft {
+                    println!("   📚 Detected PEFT format, using PEFT loader");
+                    lora_manager.load_from_peft(lora_path.to_str().unwrap(), &processor.device)?;
+                } else {
+                    lora_manager
+                        .load_from_safetensors(lora_path.to_str().unwrap(), &processor.device)?;
+                }
+            }
         }
 
         processor.model.apply_lora(&lora_manager)?;
@@ -350,8 +393,8 @@ impl Llama2CProcessor {
 #[async_trait]
 impl Processor for Llama2CProcessor {
     async fn process(&self, request: Request) -> CoreResult<Response> {
-        println!("\n🚀 Llama2CProcessor.process called!");
-        println!("  Input message: {}", request.message);
+        eprintln!("\n🚀 Llama2CProcessor.process called!");
+        eprintln!("  Input message: {}", request.message);
 
         // Tokenize the input
         let encoding = self
@@ -360,7 +403,7 @@ impl Processor for Llama2CProcessor {
             .map_err(|e| CandleError::Other(e.to_string()))?;
 
         let mut tokens = encoding.get_ids().to_vec();
-        println!(
+        eprintln!(
             "  Tokenized to {} tokens: {:?}",
             tokens.len(),
             &tokens[..tokens.len().min(10)]
@@ -428,13 +471,7 @@ impl Processor for Llama2CProcessor {
             .decode(&generated_tokens, false)
             .map_err(|e| CandleError::Other(e.to_string()))?;
 
-        let message = format!(
-            "Input: '{}' (tokens: {:?}) -> Generated: '{}' (tokens: {:?})",
-            request.message,
-            encoding.get_ids(),
-            generated_text,
-            generated_tokens
-        );
+        let message = format!("Generated: '{}'", generated_text);
 
         Ok(Response::simple(request.id, message))
     }
