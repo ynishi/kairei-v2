@@ -123,16 +123,16 @@ enum Commands {
     },
     /// Train a LoRA model
     Train {
-        /// Path to training data JSON file
-        #[arg(
-            long,
-            short = 'd',
-            default_value = "training/data/dialogue_dataset.json"
-        )]
+        /// Path to training data JSON file (required)
+        #[arg(long, short = 'd')]
         train_data: String,
 
-        /// Number of training epochs (recommended: 10+ for meaningful results)
-        #[arg(long, short = 'e', default_value = "10")]
+        /// Base model name (registered name or HuggingFace ID)
+        #[arg(long, short = 'm')]
+        model: String,
+
+        /// Number of training epochs
+        #[arg(long, short = 'e', default_value = "5")]
         epochs: u32,
 
         /// LoRA rank (recommended: 8-16 for better learning)
@@ -146,14 +146,6 @@ enum Commands {
         /// Output directory for trained model
         #[arg(long, short = 'o', default_value = "./lora_output")]
         output_dir: String,
-
-        /// Model ID from HuggingFace
-        #[arg(
-            long,
-            short = 'm',
-            default_value = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-        )]
-        model: String,
 
         /// Batch size per device
         #[arg(long, default_value = "1")]

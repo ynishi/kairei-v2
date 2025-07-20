@@ -36,6 +36,42 @@ pub async fn run_train(
         ));
     }
 
+    // Resolve model name (check if it's a registered model)
+    let resolved_model = if !model.contains('/') {
+        // Might be a registered model name, check if it exists
+        let model_path = Path::new("models").join(&model);
+        if model_path.exists() {
+            // Check for meta.toml to get the HuggingFace ID
+            let meta_path = model_path.join("meta.toml");
+            if meta_path.exists() {
+                // Try to extract the repo_id from meta.toml
+                if let Ok(meta_content) = std::fs::read_to_string(&meta_path) {
+                    if let Ok(metadata) = toml::from_str::<toml::Value>(&meta_content) {
+                        if let Some(repo_id) = metadata.get("repo_id").and_then(|v| v.as_str()) {
+                            println!("📦 Resolved '{}' to HuggingFace model: {}", model, repo_id);
+                            repo_id.to_string()
+                        } else {
+                            // Fallback: use the original model string
+                            model.clone()
+                        }
+                    } else {
+                        model.clone()
+                    }
+                } else {
+                    model.clone()
+                }
+            } else {
+                model.clone()
+            }
+        } else {
+            // Not a registered model, assume it's a HuggingFace ID
+            model.clone()
+        }
+    } else {
+        // Already looks like a HuggingFace ID
+        model.clone()
+    };
+
     // Adjust train_data path if it starts with "training/"
     let adjusted_train_data = if train_data.starts_with("training/") {
         train_data.strip_prefix("training/").unwrap().to_string()
@@ -60,7 +96,7 @@ pub async fn run_train(
         .arg("--output-dir")
         .arg(&output_dir)
         .arg("--model")
-        .arg(&model)
+        .arg(&resolved_model)
         .arg("--batch-size")
         .arg(batch_size.to_string())
         .arg("--learning-rate")
@@ -71,7 +107,7 @@ pub async fn run_train(
     }
 
     println!("📝 Training configuration:");
-    println!("  Model: {}", model);
+    println!("  Model: {}", resolved_model);
     println!("  Training data: {}", train_data);
     println!("  Epochs: {}", epochs);
     println!("  LoRA rank: {}", lora_r);
