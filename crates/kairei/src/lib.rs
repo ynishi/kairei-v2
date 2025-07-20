@@ -21,7 +21,8 @@ pub use error::{KaireiError, Result as KaireiResult};
 // Feature-gated re-exports
 #[cfg(feature = "candle")]
 pub use kairei_candle::{
-    Llama2CProcessor, Llama2CProcessorBuilder, Llama2Config, Llama2LoraProcessor,
+    Llama2CProcessor, Llama2CProcessorBuilder, Llama2Config, Llama2LoraProcessor, Llama3Config,
+    Llama3LoraProcessor,
 };
 
 /// Prelude module for convenient imports

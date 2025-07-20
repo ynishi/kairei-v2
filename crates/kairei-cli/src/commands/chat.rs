@@ -190,6 +190,132 @@ pub async fn run_chat(
                     .processor(processor)
                     .build()?
             }
+            ModelType::Llama3 => {
+                println!("🚀 Initializing Candle backend (Llama3 with LoRA)...");
+
+                // Model path
+                let model_path = base_model
+                    .as_deref()
+                    .unwrap_or("models/llama3-8b.safetensors");
+
+                // Tokenizer path with auto-detection
+                let tokenizer_path = if let Some(path) = tokenizer_path.as_ref() {
+                    path.clone()
+                } else {
+                    // Auto-detect tokenizer
+                    let model_dir = std::path::Path::new(model_path).parent();
+                    let possible_paths = vec![
+                        // Check in model directory
+                        model_dir
+                            .map(|d| d.join("tokenizer.json").to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        // Standard locations
+                        "models/tokenizer.json".to_string(),
+                        "tokenizer.json".to_string(),
+                    ];
+
+                    let mut found_path = None;
+                    for path in &possible_paths {
+                        if std::path::Path::new(path).exists() {
+                            println!("🔍 Auto-detected tokenizer: {}", path);
+                            found_path = Some(path.clone());
+                            break;
+                        }
+                    }
+
+                    found_path.unwrap_or_else(|| {
+                        println!("⚠️  No tokenizer auto-detected, using default");
+                        "models/tokenizer.json".to_string()
+                    })
+                };
+
+                // Check if files exist
+                if !std::path::Path::new(model_path).exists() {
+                    return Err(CliError::InvalidInput(format!(
+                        "Model file not found: {}. Please download a Llama3 model first.",
+                        model_path
+                    )));
+                }
+
+                if !std::path::Path::new(&tokenizer_path).exists() {
+                    return Err(CliError::InvalidInput(format!(
+                        "Tokenizer file not found: {}. Please download the tokenizer first or specify with --tokenizer.",
+                        tokenizer_path
+                    )));
+                }
+
+                // Get LoRA path if specified
+                let lora_path = if !lora_paths.is_empty() {
+                    Some(lora_paths[0].to_str().unwrap())
+                } else {
+                    None
+                };
+
+                println!("📄 Model: {}", model_path);
+                println!("📖 Tokenizer: {}", tokenizer_path);
+                if let Some(lora) = lora_path {
+                    println!("🎯 LoRA: {}", lora);
+                }
+
+                // Initialize Llama3LoraProcessor
+                use candle_core::{DType, Device};
+                use kairei::Llama3Config as Config;
+
+                // Load config from model directory if available
+                let config =
+                    if model_path.contains("llama3_1b") || model_path.contains("Llama-3.2-1B") {
+                        // Llama3.2 1B config
+                        Config {
+                            hidden_size: 2048,
+                            intermediate_size: 8192,
+                            vocab_size: 128256,
+                            num_hidden_layers: 16,
+                            num_attention_heads: 32,
+                            num_key_value_heads: 8,
+                            max_position_embeddings: 131072,
+                            rope_theta: 500000.0,
+                            rms_norm_eps: 1e-5,
+                            rope_scaling: None,
+                            tie_word_embeddings: true,
+                            use_flash_attn: false,
+                        }
+                    } else {
+                        // Default to 8B config
+                        Config {
+                            hidden_size: 4096,
+                            intermediate_size: 14336,
+                            vocab_size: 128256,
+                            num_hidden_layers: 32,
+                            num_attention_heads: 32,
+                            num_key_value_heads: 8,
+                            max_position_embeddings: 131072,
+                            rope_theta: 500000.0,
+                            rms_norm_eps: 1e-5,
+                            rope_scaling: None,
+                            tie_word_embeddings: true,
+                            use_flash_attn: false,
+                        }
+                    };
+                let device = Device::Cpu;
+                let dtype = DType::F16;
+
+                let processor = kairei::Llama3LoraProcessor::new(
+                    model_path,
+                    &tokenizer_path,
+                    lora_path,
+                    device,
+                    dtype,
+                    config,
+                    max_tokens,
+                )?;
+
+                println!("✅ Llama3 with LoRA backend ready!");
+
+                KaireiApp::builder("kairei-chat")
+                    .llm_mode()
+                    .processor(processor)
+                    .build()?
+            }
             ModelType::Llama2c => {
                 println!("🔥 Initializing Candle backend (LLaMA2-C)...");
 

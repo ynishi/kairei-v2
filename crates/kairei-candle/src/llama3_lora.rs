@@ -550,6 +550,20 @@ impl Llama3LoraProcessor {
         // Load model weights
         println!("🏗️ Loading model weights from: {}", model_path);
         let tensors = candle_core::safetensors::load(model_path, &device)?;
+
+        // Log available tensors
+        println!("📋 Model file contains {} tensors:", tensors.len());
+        let mut tensor_names: Vec<_> = tensors.keys().cloned().collect();
+        tensor_names.sort();
+        for (i, name) in tensor_names.iter().enumerate() {
+            if i < 20 || name.contains("lm_head") || name.contains("embed_tokens") {
+                println!("   - {}", name);
+            }
+        }
+        if tensor_names.len() > 20 {
+            println!("   ... and {} more", tensor_names.len() - 20);
+        }
+
         let vb = VarBuilder::from_tensors(tensors, dtype, &device);
 
         // Load model
@@ -571,15 +585,34 @@ impl Llama3LoraProcessor {
                 }
             }
 
-            // Process LoRA weights
+            // Process LoRA weights with different naming patterns
             for (name, tensor) in lora_tensors.iter() {
+                // Pattern 1: .lora_a. / .lora_b.
                 if name.contains(".lora_a.") {
                     let base_name = name.replace(".lora_a.weight", "");
                     let b_name = name.replace(".lora_a.", ".lora_b.");
 
                     if let Some(b_tensor) = lora_tensors.get(&b_name) {
-                        println!("   Found LoRA pair: {}", base_name);
+                        println!("   Found LoRA pair (pattern 1): {}", base_name);
                         lora_weights.insert(base_name, (tensor.clone(), b_tensor.clone()));
+                    }
+                }
+                // Pattern 2: .a<number>.weight / .b<number>.weight (candle-lora format)
+                else if let Some(captures) = regex::Regex::new(r"(.+)\.a(\d+)\.weight$")
+                    .unwrap()
+                    .captures(name)
+                {
+                    let base_name = captures.get(1).unwrap().as_str();
+                    let layer_num = captures.get(2).unwrap().as_str();
+                    let b_name = format!("{}.b{}.weight", base_name, layer_num);
+
+                    if let Some(b_tensor) = lora_tensors.get(&b_name) {
+                        println!(
+                            "   Found LoRA pair (pattern 2): {} layer {}",
+                            base_name, layer_num
+                        );
+                        let full_name = format!("{}.{}", base_name, layer_num);
+                        lora_weights.insert(full_name, (tensor.clone(), b_tensor.clone()));
                     }
                 }
             }
