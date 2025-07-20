@@ -4,8 +4,12 @@
 //! It includes PEFT (Parameter-Efficient Fine-Tuning) format compatibility for seamless
 //! integration with HuggingFace PEFT adapters.
 
+use async_trait::async_trait;
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::Linear;
+use kairei_core::{
+    LoRATunerConfig, Tuner, TunerMetadata, TuningContext, TuningResult,
+};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -416,5 +420,105 @@ impl LoraManager {
 
         // No LoRA for this module
         LoraLinear::from_linear(linear)
+    }
+}
+
+/// Tuner implementation for LoRA
+pub struct CandleLoRATuner {
+    /// LoRA manager
+    manager: LoraManager,
+    /// Device for computations
+    device: Device,
+    /// Data type
+    dtype: DType,
+}
+
+impl CandleLoRATuner {
+    /// Create a new LoRA tuner
+    pub fn new(config: LoraConfig, device: Device, dtype: DType) -> Self {
+        Self {
+            manager: LoraManager::new(config),
+            device,
+            dtype,
+        }
+    }
+
+    /// Create from a LoRATunerConfig (from kairei-core)
+    pub fn from_core_config(config: &LoRATunerConfig, device: Device, dtype: DType) -> Self {
+        let lora_config = LoraConfig {
+            r: config.rank,
+            alpha: config.alpha as f64,
+            dropout: config.dropout.unwrap_or(0.0) as f64,
+            target_modules: config.target_modules.clone(),
+        };
+        Self::new(lora_config, device, dtype)
+    }
+
+    /// Get the underlying LoRA manager
+    pub fn manager(&self) -> &LoraManager {
+        &self.manager
+    }
+
+    /// Get mutable reference to the LoRA manager
+    pub fn manager_mut(&mut self) -> &mut LoraManager {
+        &mut self.manager
+    }
+}
+
+#[async_trait]
+impl Tuner for CandleLoRATuner {
+    async fn apply(&self, _context: TuningContext) -> kairei_core::Result<TuningResult> {
+        // For now, LoRA application is done through the LoraLinear layers
+        // This method could be used for fine-tuning in the future
+        Ok(TuningResult {
+            success: true,
+            loss: None,
+            metrics: HashMap::new(),
+            messages: vec!["LoRA weights applied through model layers".to_string()],
+        })
+    }
+
+    async fn save(&self, path: &str) -> kairei_core::Result<()> {
+        // Convert LoRA weights to safetensors format
+        let mut tensors = HashMap::new();
+
+        for (name, (lora_a, lora_b)) in &self.manager.lora_weights {
+            tensors.insert(format!("{}.lora_A.weight", name), lora_a.clone());
+            tensors.insert(format!("{}.lora_B.weight", name), lora_b.clone());
+        }
+
+        // Save using candle's safetensors
+        candle_core::safetensors::save(&tensors, path).map_err(|e| {
+            kairei_core::CoreError::Processing(format!("Failed to save LoRA weights: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    async fn load(&self, path: &str) -> kairei_core::Result<()> {
+        // This would need a mutable reference to actually load weights
+        // For now, use manager's load methods directly
+        Err(kairei_core::CoreError::Processing(
+            "Use manager_mut().load_from_safetensors() for loading".to_string(),
+        ))
+    }
+
+    fn metadata(&self) -> TunerMetadata {
+        TunerMetadata {
+            name: Some("CandleLoRATuner".to_string()),
+            tuning_type: Some("LoRA".to_string()),
+            description: Some("Low-Rank Adaptation for Candle models".to_string()),
+            version: Some("0.1.0".to_string()),
+            supported_models: vec![
+                "llama".to_string(),
+                "llama2".to_string(),
+                "llama3".to_string(),
+            ],
+            capabilities: vec![
+                "peft_compatible".to_string(),
+                "safetensors".to_string(),
+                "flexible_matching".to_string(),
+            ],
+        }
     }
 }
