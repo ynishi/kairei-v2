@@ -1,5 +1,6 @@
 //! Chat command handler
 
+use crate::ModelType;
 use crate::error::CliError;
 use kairei::prelude::*;
 use rustyline::DefaultEditor;
@@ -7,6 +8,13 @@ use std::path::{Path, PathBuf};
 
 /// Resolve LoRA model path from name
 fn resolve_lora_path(lora_name: &str) -> Result<PathBuf, CliError> {
+    // First check if it's a direct path
+    let path = Path::new(lora_name);
+    if path.exists() && path.extension().is_some_and(|ext| ext == "safetensors") {
+        return Ok(path.to_path_buf());
+    }
+
+    // Otherwise, check in loras directory
     let lora_dir = Path::new("loras").join(lora_name);
     let lora_file = lora_dir.join("adapter.safetensors");
 
@@ -26,6 +34,9 @@ pub async fn run_chat(
     use_candle: bool,
     lora_models: Vec<String>,
     base_model: Option<String>,
+    model_type: ModelType,
+    tokenizer_path: Option<String>,
+    max_tokens: usize,
 ) -> Result<(), CliError> {
     // Only show header in interactive mode
     if !once {
@@ -58,47 +69,171 @@ pub async fn run_chat(
 
     // Build the application
     let app = if use_candle {
-        println!("🔥 Initializing Candle backend (LLaMA2-C)...");
+        match model_type {
+            ModelType::Llama2 => {
+                println!("🚀 Initializing Candle backend (Llama2 with LoRA)...");
 
-        // Create processor builder
-        let mut builder = kairei::Llama2CProcessorBuilder::new();
+                // Model path
+                let model_path = base_model
+                    .as_deref()
+                    .unwrap_or("models/llama2-7b.safetensors");
 
-        // Use the appropriate model file path
-        let model_path = if let Some(ref model) = base_model {
-            model.as_str()
-        } else {
-            "models/stories15M.bin"
-        };
+                // Tokenizer path with auto-detection
+                let tokenizer_path = if let Some(path) = tokenizer_path.as_ref() {
+                    path.clone()
+                } else {
+                    // Try to auto-detect tokenizer based on model location
+                    let model_dir = std::path::Path::new(model_path)
+                        .parent()
+                        .map(|p| p.to_str().unwrap_or("models"))
+                        .unwrap_or("models");
 
-        // Add model file if it exists
-        if std::path::Path::new(model_path).exists() {
-            println!("📄 Found model file: {}", model_path);
-            builder = builder.with_model_file(model_path);
-        } else {
-            println!(
-                "⚠️  Model file not found: {}, using default config",
-                model_path
-            );
-        }
+                    // Check for common tokenizer names
+                    let possible_paths = vec![
+                        format!("{}/tokenizer.json", model_dir),
+                        format!("{}/tokenizer.model", model_dir),
+                        "models/tokenizer.json".to_string(),
+                        "models/tinyllama_lora/tokenizer.json".to_string(),
+                    ];
 
-        // Add LoRA adapters if any
-        if !lora_paths.is_empty() {
-            println!("🔧 Adding {} LoRA adapter(s)...", lora_paths.len());
-            for (idx, path) in lora_paths.iter().enumerate() {
-                println!("   [{}] {}", idx + 1, path.display());
+                    let mut found_path = None;
+                    for path in &possible_paths {
+                        if std::path::Path::new(path).exists() {
+                            println!("🔍 Auto-detected tokenizer: {}", path);
+                            found_path = Some(path.clone());
+                            break;
+                        }
+                    }
+
+                    found_path.unwrap_or_else(|| {
+                        println!("⚠️  No tokenizer auto-detected, using default");
+                        "models/tokenizer.json".to_string()
+                    })
+                };
+
+                // Check if files exist
+                if !std::path::Path::new(model_path).exists() {
+                    return Err(CliError::InvalidInput(format!(
+                        "Model file not found: {}. Please download a Llama2 model first.",
+                        model_path
+                    )));
+                }
+
+                if !std::path::Path::new(&tokenizer_path).exists() {
+                    return Err(CliError::InvalidInput(format!(
+                        "Tokenizer file not found: {}. Please download the tokenizer first or specify with --tokenizer.",
+                        tokenizer_path
+                    )));
+                }
+
+                // Get LoRA path if specified
+                let lora_path = if !lora_paths.is_empty() {
+                    Some(lora_paths[0].to_str().unwrap())
+                } else {
+                    None
+                };
+
+                println!("📄 Model: {}", model_path);
+                println!("📖 Tokenizer: {}", tokenizer_path);
+                if let Some(lora) = lora_path {
+                    println!("🎯 LoRA: {}", lora);
+                }
+
+                // Initialize Llama2LoraProcessor
+                use candle_core::{DType, Device};
+                // use candle_lora_transformers::llama::Config;
+                use kairei::Llama2Config as Config;
+
+                // Load config from model directory if available
+                let config = if model_path.contains("tinyllama") {
+                    // TinyLlama config
+                    Config {
+                        dim: 2048,
+                        hidden_dim: 5632,
+                        vocab_size: 32000,
+                        n_layers: 22,
+                        n_heads: 32,
+                        n_kv_heads: 4,
+                        seq_len: 2048,
+                        norm_eps: 1e-5,
+                    }
+                } else {
+                    // Default to 7B config
+                    Config {
+                        dim: 4096,
+                        hidden_dim: 11008,
+                        vocab_size: 32000,
+                        n_layers: 32,
+                        n_heads: 32,
+                        n_kv_heads: 32,
+                        seq_len: 2048,
+                        norm_eps: 1e-5,
+                    }
+                };
+                let device = Device::Cpu;
+                let dtype = DType::F16;
+
+                let processor = kairei::Llama2LoraProcessor::init(
+                    model_path,
+                    &tokenizer_path,
+                    lora_path,
+                    device,
+                    dtype,
+                    config,
+                    max_tokens,
+                )?;
+
+                println!("✅ Llama2 with LoRA backend ready!");
+
+                KaireiApp::builder("kairei-chat")
+                    .llm_mode()
+                    .processor(processor)
+                    .build()?
             }
-            builder = builder.with_loras(lora_paths);
+            ModelType::Llama2c => {
+                println!("🔥 Initializing Candle backend (LLaMA2-C)...");
+
+                // Create processor builder
+                let mut builder = kairei::Llama2CProcessorBuilder::new();
+
+                // Use the appropriate model file path
+                let model_path = if let Some(ref model) = base_model {
+                    model.as_str()
+                } else {
+                    "models/stories15M.bin"
+                };
+
+                // Add model file if it exists
+                if std::path::Path::new(model_path).exists() {
+                    println!("📄 Found model file: {}", model_path);
+                    builder = builder.with_model_file(model_path);
+                } else {
+                    println!(
+                        "⚠️  Model file not found: {}, using default config",
+                        model_path
+                    );
+                }
+
+                // Add LoRA adapters if any
+                if !lora_paths.is_empty() {
+                    println!("🔧 Adding {} LoRA adapter(s)...", lora_paths.len());
+                    for (idx, path) in lora_paths.iter().enumerate() {
+                        println!("   [{}] {}", idx + 1, path.display());
+                    }
+                    builder = builder.with_loras(lora_paths);
+                }
+
+                // Build the processor
+                println!("🏗️  Building processor...");
+                let processor = builder.build()?;
+                println!("✅ LLaMA2-C backend ready!");
+
+                KaireiApp::builder("kairei-chat")
+                    .llm_mode()
+                    .processor(processor)
+                    .build()?
+            }
         }
-
-        // Build the processor
-        println!("🏗️  Building processor...");
-        let processor = builder.build()?;
-        println!("✅ LLaMA2-C backend ready!");
-
-        KaireiApp::builder("kairei-chat")
-            .llm_mode()
-            .processor(processor)
-            .build()?
     } else {
         // Use echo processor as fallback
         KaireiApp::builder("kairei-chat")
