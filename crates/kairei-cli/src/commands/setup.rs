@@ -76,6 +76,7 @@ impl Model {
 
 pub async fn run_setup(
     list: bool,
+    models: bool,
     model: Option<String>,
     force: bool,
     name: Option<String>,
@@ -83,6 +84,11 @@ pub async fn run_setup(
 ) -> Result<(), CliError> {
     if list {
         list_models();
+        return Ok(());
+    }
+
+    if models {
+        list_downloaded_models()?;
         return Ok(());
     }
 
@@ -185,6 +191,120 @@ fn list_models() {
     println!("  kairei setup                    # Download default models");
     println!("  kairei setup --model stories42M # Download specific model");
     println!("  kairei setup --list            # List available models");
+}
+
+fn list_downloaded_models() -> Result<(), CliError> {
+    let models_dir = Path::new("models");
+
+    if !models_dir.exists() {
+        println!("📁 No models directory found. Run 'kairei setup' first to download models.");
+        return Ok(());
+    }
+
+    println!("📦 Downloaded models:");
+    println!("===================");
+    println!();
+
+    let mut found_models = false;
+
+    // Check for llama2c style models (*.bin files)
+    if let Ok(entries) = fs::read_dir(models_dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+
+                // Check for .bin files (llama2c models)
+                if path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                    if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                        println!("  {} (llama2c model)", filename);
+                        found_models = true;
+                    }
+                }
+
+                // Check for directories with meta.toml
+                if path.is_dir() {
+                    let meta_path = path.join("meta.toml");
+
+                    if meta_path.exists() {
+                        // Try to read metadata
+                        match fs::read_to_string(&meta_path) {
+                            Ok(content) => {
+                                match toml::from_str::<ModelMetadata>(&content) {
+                                    Ok(metadata) => {
+                                        println!(
+                                            "  {} - {}",
+                                            metadata.name,
+                                            metadata
+                                                .description
+                                                .as_deref()
+                                                .unwrap_or("No description")
+                                        );
+                                        println!("       Repo: {}", metadata.repo_id);
+                                        if let Some(params) = &metadata.parameters {
+                                            println!("       Size: {}", params);
+                                        }
+                                        if let Some(arch) = &metadata.architecture {
+                                            println!("       Architecture: {}", arch);
+                                        }
+                                        println!("       Downloaded: {}", metadata.downloaded_at);
+                                    }
+                                    Err(_) => {
+                                        // Fallback to directory name if metadata is invalid
+                                        if let Some(dirname) =
+                                            path.file_name().and_then(|s| s.to_str())
+                                        {
+                                            println!("  {} (metadata error)", dirname);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                // Fallback to directory name if can't read metadata
+                                if let Some(dirname) = path.file_name().and_then(|s| s.to_str()) {
+                                    println!("  {} (no metadata)", dirname);
+                                }
+                            }
+                        }
+                        found_models = true;
+                    } else {
+                        // Check if it's a model directory without meta.toml
+                        let has_model_files =
+                            ["model.safetensors", "pytorch_model.bin", "config.json"]
+                                .iter()
+                                .any(|file| path.join(file).exists());
+
+                        if has_model_files {
+                            if let Some(dirname) = path.file_name().and_then(|s| s.to_str()) {
+                                println!("  {} (no metadata)", dirname);
+                                found_models = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Check for tokenizer
+    let tokenizer_path = models_dir.join("tokenizer.json");
+    if tokenizer_path.exists() {
+        println!("  tokenizer.json (LLaMA tokenizer)");
+        found_models = true;
+    }
+
+    if !found_models {
+        println!("  No models found. Run 'kairei setup' to download models.");
+    }
+
+    println!();
+    println!("To download more models:");
+    println!("  kairei setup --list                              # See available models");
+    println!("  kairei setup <name> <repo_id>                    # Download from HuggingFace");
+    println!();
+    println!("To train with a model:");
+    println!("  kairei train -m <model_name> -d <data.json>      # Use model name from above");
+
+    Ok(())
 }
 
 async fn download_model(model: &Model, target_path: &Path) -> Result<(), CliError> {

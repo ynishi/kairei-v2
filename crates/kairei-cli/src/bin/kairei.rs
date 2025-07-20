@@ -100,9 +100,12 @@ enum Commands {
     },
     /// Setup models and dependencies
     Setup {
-        /// List available models
+        /// List available models for download
         #[arg(long)]
         list: bool,
+        /// List downloaded models
+        #[arg(long)]
+        models: bool,
         /// Model name to download (e.g., stories15M, stories42M, stories110M)
         #[arg(long, short)]
         model: Option<String>,
@@ -196,13 +199,21 @@ async fn main() -> Result<(), CliError> {
         }
         Some(Commands::Setup {
             list,
+            models,
             model,
             force,
             name,
             repo_id,
         }) => {
-            commands::run_setup(*list, model.clone(), *force, name.clone(), repo_id.clone())
-                .await?;
+            commands::run_setup(
+                *list,
+                *models,
+                model.clone(),
+                *force,
+                name.clone(),
+                repo_id.clone(),
+            )
+            .await?;
         }
         Some(Commands::Lora { command }) => match command {
             Some(LoraCommands::Add {
