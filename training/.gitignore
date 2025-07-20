@@ -164,3 +164,6 @@ test_data_cache/
 
 # LoRA training outputs
 lora_output/
+
+# Training data
+data/
