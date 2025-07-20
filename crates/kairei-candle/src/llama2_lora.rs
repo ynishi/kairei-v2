@@ -476,14 +476,14 @@ impl Llama2WithLora {
 }
 
 /// Processor implementation
-pub struct ManualLlama2LoraProcessor {
+pub struct Llama2LoraProcessor {
     model: std::sync::Mutex<Llama2WithLora>,
     tokenizer: Tokenizer,
     device: Device,
     max_tokens: usize,
 }
 
-impl ManualLlama2LoraProcessor {
+impl Llama2LoraProcessor {
     /// Initialize with the same interface as existing Llama2LoraProcessor
     pub fn init(
         model_path: &str,
@@ -514,7 +514,7 @@ impl ManualLlama2LoraProcessor {
         config: Config,
         max_tokens: usize,
     ) -> Result<Self, CandleError> {
-        println!("🚀 Initializing Manual Llama2 LoRA Processor...");
+        println!("🚀 Initializing Llama2 LoRA Processor...");
 
         // Load tokenizer
         println!("📖 Loading tokenizer from: {}", tokenizer_path);
@@ -595,11 +595,11 @@ impl ManualLlama2LoraProcessor {
 }
 
 #[async_trait]
-impl Processor for ManualLlama2LoraProcessor {
+impl Processor for Llama2LoraProcessor {
     async fn process(&self, request: Request) -> CoreResult<Response> {
         use kairei_core::CoreError;
 
-        println!("🚀 ManualLlama2LoraProcessor.process called!");
+        println!("🚀 Llama2LoraProcessor.process called!");
         println!("  Input message: {}", request.message);
 
         // Get mutable access to the model
@@ -766,7 +766,7 @@ impl Processor for ManualLlama2LoraProcessor {
 
     fn metadata(&self) -> ProcessorMetadata {
         ProcessorMetadata {
-            name: Some("Manual Llama2 LoRA Processor".to_string()),
+            name: Some("Llama2 LoRA Processor".to_string()),
             description: Some("Llama2 with manual LoRA implementation".to_string()),
             version: Some("0.1.0".to_string()),
             capabilities: vec!["text-generation".to_string(), "lora".to_string()],
