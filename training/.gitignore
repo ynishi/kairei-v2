@@ -161,3 +161,6 @@ secrets/
 # Test data cache
 .test_cache/
 test_data_cache/
+
+# LoRA training outputs
+lora_output/
