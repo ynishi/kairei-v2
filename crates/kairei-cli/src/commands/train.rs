@@ -1,6 +1,8 @@
 //! Train command implementation
 
 use crate::error::CliError;
+use chrono::Local;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -10,13 +12,24 @@ pub async fn run_train(
     epochs: u32,
     lora_r: u32,
     lora_alpha: u32,
-    output_dir: String,
+    output_dir: Option<String>,
     model: String,
     batch_size: u32,
     learning_rate: f32,
     test: bool,
 ) -> Result<(), CliError> {
     println!("🎯 Starting LoRA training...\n");
+
+    // Generate output directory with timestamp if not specified
+    let output_dir = output_dir.unwrap_or_else(|| {
+        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
+        let model_name = model.split('/').last().unwrap_or(&model).replace('.', "_");
+        format!("training/lora_output/{}_{}", model_name, timestamp)
+    });
+
+    // Create output directory if it doesn't exist
+    fs::create_dir_all(&output_dir)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to create output directory: {}", e)))?;
 
     // Check if training script exists
     let script_path = "training/scripts/train_lora.py";
@@ -79,6 +92,13 @@ pub async fn run_train(
         train_data.clone()
     };
 
+    // Adjust output_dir path if it starts with "training/"
+    let adjusted_output_dir = if output_dir.starts_with("training/") {
+        output_dir.strip_prefix("training/").unwrap().to_string()
+    } else {
+        output_dir.clone()
+    };
+
     // Build the command
     let mut cmd = Command::new("poetry");
     cmd.current_dir("training")
@@ -94,7 +114,7 @@ pub async fn run_train(
         .arg("--lora-alpha")
         .arg(lora_alpha.to_string())
         .arg("--output-dir")
-        .arg(&output_dir)
+        .arg(&adjusted_output_dir)
         .arg("--model")
         .arg(&resolved_model)
         .arg("--batch-size")

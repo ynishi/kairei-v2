@@ -146,9 +146,9 @@ enum Commands {
         #[arg(long, default_value = "16")]
         lora_alpha: u32,
 
-        /// Output directory for trained model
-        #[arg(long, short = 'o', default_value = "./lora_output")]
-        output_dir: String,
+        /// Output directory for trained model (defaults to training/lora_output/<timestamp>)
+        #[arg(long, short = 'o')]
+        output_dir: Option<String>,
 
         /// Batch size per device
         #[arg(long, default_value = "1")]
