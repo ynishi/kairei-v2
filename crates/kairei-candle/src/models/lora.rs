@@ -1,8 +1,14 @@
-//! LoRA (Low-Rank Adaptation) implementation for Llama2c
+//! LoRA (Low-Rank Adaptation) implementation for Candle models
+//!
+//! This module provides generic LoRA functionality that can be used with any Candle-based model.
+//! It includes PEFT (Parameter-Efficient Fine-Tuning) format compatibility for seamless
+//! integration with HuggingFace PEFT adapters.
 
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::Linear;
+use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::Path;
 
 /// LoRA adapter configuration
 #[derive(Debug, Clone)]
@@ -23,6 +29,19 @@ impl Default for LoraConfig {
             r: 16,
             alpha: 16.0,
             dropout: 0.0,
+            // Empty by default - should be configured per model type
+            target_modules: vec![],
+        }
+    }
+}
+
+impl LoraConfig {
+    /// Create a configuration with common Llama-style target modules
+    pub fn llama_default() -> Self {
+        Self {
+            r: 16,
+            alpha: 16.0,
+            dropout: 0.0,
             target_modules: vec![
                 "q_proj".to_string(),
                 "v_proj".to_string(),
@@ -31,6 +50,21 @@ impl Default for LoraConfig {
                 "gate_proj".to_string(),
                 "up_proj".to_string(),
                 "down_proj".to_string(),
+            ],
+        }
+    }
+
+    /// Create a configuration with basic attention-only target modules
+    pub fn attention_only() -> Self {
+        Self {
+            r: 16,
+            alpha: 16.0,
+            dropout: 0.0,
+            target_modules: vec![
+                "q_proj".to_string(),
+                "v_proj".to_string(),
+                "k_proj".to_string(),
+                "o_proj".to_string(),
             ],
         }
     }
@@ -117,6 +151,19 @@ impl Module for LoraLinear {
     }
 }
 
+/// PEFT adapter_config.json structure
+#[derive(Debug, Deserialize)]
+pub struct PeftConfig {
+    pub r: usize,
+    pub lora_alpha: f64,
+    #[serde(default)]
+    pub lora_dropout: f64,
+    pub target_modules: Vec<String>,
+    pub peft_type: String,
+    #[serde(default)]
+    pub base_model_name_or_path: String,
+}
+
 /// Manager for LoRA adapters in a model
 pub struct LoraManager {
     /// LoRA configuration
@@ -156,6 +203,155 @@ impl LoraManager {
         Ok(())
     }
 
+    /// Load LoRA weights from a PEFT format safetensors file
+    pub fn load_from_peft(&mut self, path: &str, device: &Device) -> Result<()> {
+        println!("🎯 Loading PEFT LoRA weights from: {}", path);
+
+        // Load the safetensors file
+        let tensors = candle_core::safetensors::load(path, device)?;
+
+        // PEFT uses hierarchical naming like:
+        // base_model.model.model.layers.0.self_attn.q_proj.lora_A.weight
+        // We need to extract the meaningful parts for matching
+
+        let mut peft_pairs = HashMap::new();
+
+        // First pass: collect all PEFT LoRA pairs
+        for (name, tensor) in tensors.iter() {
+            if name.contains(".lora_A.weight") {
+                let base_name = name.replace(".lora_A.weight", "");
+                let b_name = format!("{}.lora_B.weight", base_name);
+
+                if let Some(lora_b_tensor) = tensors.get(&b_name) {
+                    // Extract the meaningful parts for our model structure
+                    // We'll create multiple possible keys for flexible matching
+                    let parts: Vec<&str> = base_name.split('.').collect();
+
+                    // Find the layer number and module name
+                    let mut layer_idx = None;
+                    let mut module_type = None; // self_attn or mlp
+                    let mut module_name = None; // q_proj, k_proj, etc.
+
+                    for (i, part) in parts.iter().enumerate() {
+                        if *part == "layers" && i + 1 < parts.len() {
+                            if let Ok(idx) = parts[i + 1].parse::<usize>() {
+                                layer_idx = Some(idx);
+                            }
+                        }
+                        // Track module type (common patterns: self_attn, mlp, attention, feed_forward)
+                        if matches!(
+                            *part,
+                            "self_attn" | "mlp" | "attention" | "feed_forward" | "attn" | "ffn"
+                        ) {
+                            module_type = Some(*part);
+                            if i + 1 < parts.len() {
+                                module_name = Some(parts[i + 1]);
+                            }
+                        }
+                    }
+
+                    // Check for common special modules (language model heads, embeddings, etc.)
+                    let special_modules = [
+                        "lm_head",
+                        "embed_tokens",
+                        "embed_in",
+                        "embed_out",
+                        "head",
+                        "classifier",
+                    ];
+                    let mut found_special = false;
+                    for special in &special_modules {
+                        if base_name.contains(special) {
+                            peft_pairs.insert(
+                                special.to_string(),
+                                (tensor.clone(), lora_b_tensor.clone()),
+                            );
+                            found_special = true;
+                            break;
+                        }
+                    }
+                    if found_special {
+                        continue;
+                    }
+
+                    // Create multiple key formats for flexible matching
+                    if let (Some(layer), Some(module)) = (layer_idx, module_name) {
+                        // Format 1: layers.{layer}.{module} (e.g., layers.0.q_proj)
+                        let key1 = format!("layers.{}.{}", layer, module);
+                        peft_pairs.insert(key1.clone(), (tensor.clone(), lora_b_tensor.clone()));
+
+                        // Format 2: Include module type for more specific matching
+                        if let Some(mod_type) = module_type {
+                            let key2 = format!("layers.{}.{}.{}", layer, mod_type, module);
+                            peft_pairs.insert(key2, (tensor.clone(), lora_b_tensor.clone()));
+                        }
+
+                        // Format 3: Just the module name for broad matching
+                        peft_pairs
+                            .insert(module.to_string(), (tensor.clone(), lora_b_tensor.clone()));
+                    }
+                }
+            }
+        }
+
+        // Clear existing weights and store new ones
+        self.lora_weights.clear();
+        for (key, (lora_a, lora_b)) in peft_pairs {
+            println!("  Found PEFT LoRA pair for: {}", key);
+            self.lora_weights.insert(key, (lora_a, lora_b));
+        }
+
+        println!(
+            "  Loaded {} PEFT LoRA adapter pairs",
+            self.lora_weights.len()
+        );
+        Ok(())
+    }
+
+    /// Load LoRA configuration from PEFT adapter_config.json
+    pub fn load_peft_config(&mut self, config_path: &str) -> Result<()> {
+        let config_str = std::fs::read_to_string(config_path)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to read config: {}", e)))?;
+
+        let peft_config: PeftConfig = serde_json::from_str(&config_str)
+            .map_err(|e| candle_core::Error::Msg(format!("Failed to parse config: {}", e)))?;
+
+        // Update our config from PEFT config
+        self.config.r = peft_config.r;
+        self.config.alpha = peft_config.lora_alpha;
+        self.config.dropout = peft_config.lora_dropout;
+        self.config.target_modules = peft_config.target_modules;
+
+        println!(
+            "📋 Loaded PEFT config: r={}, alpha={}",
+            self.config.r, self.config.alpha
+        );
+        Ok(())
+    }
+
+    /// Load LoRA weights from a PEFT directory (with adapter_config.json)
+    pub fn load_from_peft_dir(&mut self, dir_path: &str, device: &Device) -> Result<()> {
+        // First load config if available
+        let config_path = Path::new(dir_path).join("adapter_config.json");
+        if config_path.exists() {
+            self.load_peft_config(config_path.to_str().unwrap())?;
+        }
+
+        // Then load weights - try both naming conventions
+        let adapter_path = Path::new(dir_path).join("adapter_model.safetensors");
+        let adapter_path_alt = Path::new(dir_path).join("adapter.safetensors");
+
+        if adapter_path.exists() {
+            self.load_from_peft(adapter_path.to_str().unwrap(), device)
+        } else if adapter_path_alt.exists() {
+            self.load_from_peft(adapter_path_alt.to_str().unwrap(), device)
+        } else {
+            Err(candle_core::Error::Msg(
+                "No adapter weights found (tried adapter_model.safetensors and adapter.safetensors)".to_string()
+            ))
+        }
+    }
+
     /// Apply LoRA weights to a linear layer if it's a target module
     pub fn apply_to_linear(&self, linear: Linear, module_name: &str) -> LoraLinear {
         // Check if this module should have LoRA
@@ -166,10 +362,46 @@ impl LoraManager {
             .any(|target| module_name.contains(target));
 
         if should_apply {
-            // Look for LoRA weights for this module
+            // Try multiple matching strategies for flexible compatibility
+            // Strategy 1: Exact match
+            if let Some((lora_a, lora_b)) = self.lora_weights.get(module_name) {
+                println!("  ✨ Applying LoRA to: {} (exact match)", module_name);
+                let mut lora_linear = LoraLinear::from_linear(linear);
+                lora_linear.load_lora(
+                    lora_a.clone(),
+                    lora_b.clone(),
+                    self.config.alpha,
+                    self.config.r,
+                );
+                return lora_linear;
+            }
+
+            // Strategy 2: Contains match (original behavior)
             for (lora_name, (lora_a, lora_b)) in &self.lora_weights {
-                if module_name.contains(lora_name) {
-                    println!("  ✨ Applying LoRA to: {}", module_name);
+                if module_name.contains(lora_name) || lora_name.contains(module_name) {
+                    println!(
+                        "  ✨ Applying LoRA to: {} (matched with: {})",
+                        module_name, lora_name
+                    );
+                    let mut lora_linear = LoraLinear::from_linear(linear);
+                    lora_linear.load_lora(
+                        lora_a.clone(),
+                        lora_b.clone(),
+                        self.config.alpha,
+                        self.config.r,
+                    );
+                    return lora_linear;
+                }
+            }
+
+            // Strategy 3: Extract just the module suffix and try to match
+            let parts: Vec<&str> = module_name.split('.').collect();
+            if let Some(suffix) = parts.last() {
+                if let Some((lora_a, lora_b)) = self.lora_weights.get(*suffix) {
+                    println!(
+                        "  ✨ Applying LoRA to: {} (suffix match: {})",
+                        module_name, suffix
+                    );
                     let mut lora_linear = LoraLinear::from_linear(linear);
                     lora_linear.load_lora(
                         lora_a.clone(),
