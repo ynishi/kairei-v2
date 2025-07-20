@@ -7,9 +7,7 @@
 use async_trait::async_trait;
 use candle_core::{DType, Device, Module, Result, Tensor};
 use candle_nn::Linear;
-use kairei_core::{
-    LoRATunerConfig, Tuner, TunerMetadata, TuningContext, TuningResult,
-};
+use kairei_core::{LoRATunerConfig, Tuner, TunerMetadata, TuningContext, TuningResult};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
