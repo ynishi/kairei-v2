@@ -13,6 +13,21 @@ struct LoraMetadata {
     // LoRA specific params
     rank: Option<usize>,
     alpha: Option<f64>,
+    // Training information
+    training_data: Option<String>,
+    training_data_hash: Option<String>,
+    epochs: Option<u32>,
+    batch_size: Option<u32>,
+    learning_rate: Option<f32>,
+    // Lineage tracking
+    parent_lora: Option<String>,
+    source_model: Option<String>,
+    // Performance metrics
+    final_loss: Option<f32>,
+    training_duration: Option<String>,
+    // Version tracking
+    version: Option<String>,
+    training_framework: Option<String>,
 }
 
 pub async fn setup_lora() -> Result<(), CliError> {
@@ -182,6 +197,21 @@ pub async fn lora_add(
         created_at: Some(chrono::Utc::now().to_rfc3339()),
         rank: None,
         alpha: None,
+        // Training information
+        training_data: None,
+        training_data_hash: None,
+        epochs: None,
+        batch_size: None,
+        learning_rate: None,
+        // Lineage tracking
+        parent_lora: None,
+        source_model: None,
+        // Performance metrics
+        final_loss: None,
+        training_duration: None,
+        // Version tracking
+        version: Some("1.0.0".to_string()),
+        training_framework: None,
     };
 
     // Write metadata
@@ -254,7 +284,59 @@ pub async fn lora_show(name: &str) -> Result<(), CliError> {
         println!("🔢 Alpha: {}", alpha);
     }
 
-    println!("📁 Location: {}", lora_dir.display());
+    // Training information
+    if metadata.training_data.is_some() || metadata.epochs.is_some() {
+        println!("\n🎯 Training Information:");
+        println!("─────────────────────────────────────────");
+
+        if let Some(data) = &metadata.training_data {
+            println!("📊 Training Data: {}", data);
+        }
+
+        if let Some(hash) = &metadata.training_data_hash {
+            println!("🔐 Data Hash: {}", &hash[..8]);
+        }
+
+        if let Some(epochs) = metadata.epochs {
+            println!("🔄 Epochs: {}", epochs);
+        }
+
+        if let Some(batch_size) = metadata.batch_size {
+            println!("📦 Batch Size: {}", batch_size);
+        }
+
+        if let Some(lr) = metadata.learning_rate {
+            println!("📈 Learning Rate: {}", lr);
+        }
+
+        if let Some(loss) = metadata.final_loss {
+            println!("📉 Final Loss: {:.4}", loss);
+        }
+
+        if let Some(duration) = &metadata.training_duration {
+            println!("⏱️  Training Duration: {}", duration);
+        }
+
+        if let Some(framework) = &metadata.training_framework {
+            println!("🛠️  Framework: {}", framework);
+        }
+    }
+
+    // Lineage information
+    if metadata.source_model.is_some() || metadata.parent_lora.is_some() {
+        println!("\n🌳 Lineage:");
+        println!("─────────────────────────────────────────");
+
+        if let Some(source) = &metadata.source_model {
+            println!("🎯 Source Model: {}", source);
+        }
+
+        if let Some(parent) = &metadata.parent_lora {
+            println!("👆 Parent LoRA: {}", parent);
+        }
+    }
+
+    println!("\n📁 Location: {}", lora_dir.display());
 
     if file_exists {
         if let Some(size) = file_size {
@@ -325,6 +407,69 @@ pub async fn convert_peft_to_candle_lora(
     // Use the new typed conversion function with dummy embeddings enabled
     convert_peft_dir_to_candle_lora_typed(&peft_dir, &output_path, &device, true)
         .map_err(|e| CliError::InvalidInput(format!("Conversion failed: {}", e)))?;
+
+    Ok(())
+}
+
+// Update LoRA metadata with training information
+pub async fn update_lora_training_info(
+    lora_name: &str,
+    training_data: &str,
+    epochs: u32,
+    batch_size: u32,
+    learning_rate: f32,
+    final_loss: Option<f32>,
+    training_duration: Option<String>,
+    source_model: &str,
+) -> Result<(), CliError> {
+    let lora_dir = Path::new("loras").join(lora_name);
+    let meta_path = lora_dir.join("meta.toml");
+
+    if !meta_path.exists() {
+        return Err(CliError::InvalidInput(format!(
+            "Metadata not found for LoRA '{}'",
+            lora_name
+        )));
+    }
+
+    // Read existing metadata
+    let meta_content = fs::read_to_string(&meta_path)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to read metadata: {}", e)))?;
+    let mut metadata: LoraMetadata = toml::from_str(&meta_content)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to parse metadata: {}", e)))?;
+
+    // Calculate training data hash
+    let training_data_hash = if Path::new(training_data).exists() {
+        let data_content = fs::read_to_string(training_data).ok();
+        data_content.map(|content| {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = DefaultHasher::new();
+            content.hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        })
+    } else {
+        None
+    };
+
+    // Update metadata
+    metadata.training_data = Some(training_data.to_string());
+    metadata.training_data_hash = training_data_hash;
+    metadata.epochs = Some(epochs);
+    metadata.batch_size = Some(batch_size);
+    metadata.learning_rate = Some(learning_rate);
+    metadata.final_loss = final_loss;
+    metadata.training_duration = training_duration;
+    metadata.source_model = Some(source_model.to_string());
+    metadata.training_framework = Some("transformers/peft".to_string());
+
+    // Write updated metadata
+    let meta_content = toml::to_string_pretty(&metadata)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to serialize metadata: {}", e)))?;
+    fs::write(&meta_path, meta_content)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to write metadata: {}", e)))?;
+
+    println!("📝 Updated training info for LoRA '{}'", lora_name);
 
     Ok(())
 }
