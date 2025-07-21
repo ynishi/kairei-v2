@@ -1,0 +1,43 @@
+[package]
+name = "kairei-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description.workspace = true
+
+[[bin]]
+name = "kairei-api"
+path = "src/bin/kairei-api/main.rs"
+
+[dependencies]
+# 基本
+kairei = { path = "../kairei" }
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Logging  
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# OpenAPI/Swagger（最初から！）
+utoipa = { version = "4", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "6", features = ["axum"] }
+
+# エラーハンドリング
+anyhow = "1.0"
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# UUID（モデルIDなどで使用）
+uuid = { version = "1.6", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
