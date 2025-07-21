@@ -1,0 +1,18 @@
+{
+  "host": "127.0.0.1",
+  "port": 3000,
+  "log_level": "info",
+  "enable_swagger": true,
+  "cors": {
+    "allowed_origins": ["http://localhost:3000", "http://localhost:5173"],
+    "allow_any_origin": false
+  },
+  "auth": {
+    "enabled": true,
+    "auth0_domain": "your-tenant.auth0.com",
+    "auth0_audience": "https://api.kairei.dev",
+    "issuer": "https://your-tenant.auth0.com/",
+    "algorithms": ["RS256"],
+    "required_scopes": ["read:models", "write:models"]
+  }
+}

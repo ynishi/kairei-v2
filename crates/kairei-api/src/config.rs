@@ -19,6 +19,9 @@ pub struct ApiConfig {
 
     /// Enable Swagger UI
     pub enable_swagger: bool,
+
+    /// Authentication configuration
+    pub auth: AuthConfig,
 }
 
 impl Default for ApiConfig {
@@ -29,6 +32,7 @@ impl Default for ApiConfig {
             cors: CorsConfig::default(),
             log_level: "info".to_string(),
             enable_swagger: true,
+            auth: AuthConfig::default(),
         }
     }
 }
@@ -67,6 +71,42 @@ impl Default for CorsConfig {
         Self {
             allowed_origins: vec![],
             allow_any_origin: true, // Default to true for development
+        }
+    }
+}
+
+/// Authentication configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AuthConfig {
+    /// Enable authentication
+    pub enabled: bool,
+
+    /// Auth0 domain (e.g., "your-tenant.auth0.com")
+    pub auth0_domain: Option<String>,
+
+    /// Auth0 audience (API identifier)
+    pub auth0_audience: Option<String>,
+
+    /// JWT issuer
+    pub issuer: Option<String>,
+
+    /// JWT algorithms (default: ["RS256"])
+    pub algorithms: Vec<String>,
+
+    /// Required scopes for API access
+    pub required_scopes: Vec<String>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true, // Enabled by default for security
+            auth0_domain: None,
+            auth0_audience: None,
+            issuer: None,
+            algorithms: vec!["RS256".to_string()],
+            required_scopes: vec![],
         }
     }
 }

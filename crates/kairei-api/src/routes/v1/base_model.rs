@@ -287,7 +287,7 @@ pub fn routes() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/", get(list_models).post(create_model))
         .route(
-            "/:id",
+            "/{id}",
             get(get_model).put(update_model).delete(delete_model),
         )
 }

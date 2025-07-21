@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize repository and application state
     let base_model_repository = Arc::new(InMemoryBaseModelRepository::new());
-    let state = AppState::new(base_model_repository);
+    let state = AppState::new(base_model_repository, config.auth.clone());
 
     // Build application
     let app = build_app(state);
@@ -83,6 +83,20 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting server on: {}", addr);
     if config.enable_swagger {
         info!("Swagger UI: http://{}/swagger-ui", addr);
+    }
+    info!(
+        "Authentication: {}",
+        if config.auth.enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        }
+    );
+    if config.auth.enabled {
+        debug!(
+            "Auth config: domain={:?}, audience={:?}",
+            config.auth.auth0_domain, config.auth.auth0_audience
+        );
     }
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

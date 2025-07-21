@@ -5,10 +5,12 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 pub mod config;
+pub mod middleware;
 pub mod routes;
 
 pub use config::ApiConfig;
 
+use crate::config::AuthConfig;
 use kairei::base_model::{BaseModelRepository, BaseModelService};
 use std::sync::Arc;
 
@@ -16,13 +18,18 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub base_model_service: BaseModelService,
+    pub auth_config: AuthConfig,
 }
 
 impl AppState {
     /// Create a new AppState with the given repository
-    pub fn new(base_model_repository: Arc<dyn BaseModelRepository>) -> Self {
+    pub fn new(
+        base_model_repository: Arc<dyn BaseModelRepository>,
+        auth_config: AuthConfig,
+    ) -> Self {
         Self {
             base_model_service: BaseModelService::new(base_model_repository),
+            auth_config,
         }
     }
 }
@@ -57,10 +64,25 @@ pub struct ApiDoc;
 
 /// Build API application
 pub fn build_app(state: AppState) -> Router {
-    Router::new()
-        .merge(routes::routes())
+    // Create the main API routes
+    let api_routes = routes::routes();
+
+    // Build the complete app with Swagger UI
+    let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .layer(CorsLayer::permissive())
+        .merge(api_routes);
+
+    // Apply authentication middleware if enabled
+    let app = if state.auth_config.enabled {
+        app.layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::auth_middleware,
+        ))
+    } else {
+        app
+    };
+
+    app.layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

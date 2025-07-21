@@ -14,7 +14,7 @@ path = "src/bin/kairei-api/main.rs"
 [dependencies]
 # 基本
 kairei = { path = "../kairei" }
-axum = "0.7"
+axum = "0.8"
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
@@ -28,8 +28,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # OpenAPI/Swagger（最初から！）
-utoipa = { version = "4", features = ["axum_extras"] }
-utoipa-swagger-ui = { version = "6", features = ["axum"] }
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 # エラーハンドリング
 anyhow = "1.0"
@@ -41,3 +41,8 @@ clap = { version = "4", features = ["derive", "env"] }
 # UUID（モデルIDなどで使用）
 uuid = { version = "1.6", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+# JWT/Auth
+jsonwebtoken = "9"
+axum-extra = { version = "0.10", features = ["typed-header"] }
+reqwest = { version = "0.11", features = ["json"] }

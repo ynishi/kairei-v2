@@ -18,7 +18,6 @@ impl InMemoryBaseModelRepository {
 
     /// Initialize with some default models for testing
     pub fn with_defaults() -> Self {
-        
         // Add default models here if needed
         Self::new()
     }
@@ -117,7 +116,6 @@ impl BaseModelRepository for InMemoryBaseModelRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     #[tokio::test]
     async fn test_create_and_get() {
