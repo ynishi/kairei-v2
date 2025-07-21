@@ -130,3 +130,39 @@ db-logs:
 # Connect to database with psql
 db-connect:
 	docker-compose exec postgres psql -U kairei_user -d kairei_dev
+
+# ========== Local Development ==========
+
+# Run API server locally
+api-run: db-up
+	cargo run -p kairei-api --bin kairei-api
+	
+# Run API server with watch mode (requires cargo-watch)
+api-watch: db-up
+	cd crates/kairei-api && cargo watch -x run
+
+# Build API server
+api-build:
+	cargo build --bin kairei-api --release
+
+# Start development environment (DB + pgAdmin)
+dev-up:
+	docker-compose up -d
+	@echo "✅ Development services started"
+	@echo "PostgreSQL: localhost:5432"
+	@echo "pgAdmin: http://localhost:5050"
+	@echo ""
+	@echo "Run 'make api-run' to start the API server locally"
+
+# Stop development environment
+dev-down:
+	docker-compose down
+
+# View development logs
+dev-logs:
+	docker-compose logs -f
+
+# Clean everything (including volumes)
+dev-clean:
+	docker-compose down -v
+	@echo "🧹 Development environment cleaned"

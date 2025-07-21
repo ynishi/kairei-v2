@@ -1,0 +1,143 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kairei_test
+          POSTGRES_USER: kairei_user
+          POSTGRES_PASSWORD: kairei_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install SQLx CLI from cache
+      uses: actions/cache@v3
+      id: sqlx-cache
+      with:
+        path: ~/.cargo/bin/sqlx
+        key: ${{ runner.os }}-sqlx-cli
+        
+    - name: Install SQLx CLI
+      if: steps.sqlx-cache.outputs.cache-hit != 'true'
+      run: |
+        cargo install sqlx-cli --no-default-features --features postgres
+    
+    - name: Setup test database
+      env:
+        DATABASE_URL: postgresql://kairei_user:kairei_password@localhost:5432/kairei_test
+      run: |
+        cd crates/kairei
+        sqlx migrate run --source ../../migrations
+    
+    - name: Run tests
+      env:
+        DATABASE_URL: postgresql://kairei_user:kairei_password@localhost:5432/kairei_test
+      run: cargo test --all-features
+    
+    - name: Run clippy
+      run: cargo clippy -- -D warnings
+    
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+  # Integration tests need database
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: kairei_test
+          POSTGRES_USER: kairei_user
+          POSTGRES_PASSWORD: kairei_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+    
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Install SQLx CLI from cache
+      uses: actions/cache@v3
+      id: sqlx-cache
+      with:
+        path: ~/.cargo/bin/sqlx
+        key: ${{ runner.os }}-sqlx-cli
+        
+    - name: Install SQLx CLI
+      if: steps.sqlx-cache.outputs.cache-hit != 'true'
+      run: |
+        cargo install sqlx-cli --no-default-features --features postgres
+    
+    - name: Setup test database
+      env:
+        DATABASE_URL: postgresql://kairei_user:kairei_password@localhost:5432/kairei_test
+      run: |
+        cd crates/kairei
+        sqlx migrate run --source ../../migrations
+    
+    - name: Run integration tests
+      env:
+        DATABASE_URL: postgresql://kairei_user:kairei_password@localhost:5432/kairei_test
+      run: |
+        cargo test -p kairei --test integration_tests -- --test-threads=1
