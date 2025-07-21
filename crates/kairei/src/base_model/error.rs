@@ -19,6 +19,9 @@ pub enum BaseModelError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("Database error: {0}")]
+    DatabaseError(String),
 }
 
 pub type BaseModelResult<T> = Result<T, BaseModelError>;

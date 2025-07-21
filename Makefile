@@ -1,4 +1,4 @@
-.PHONY: all build check test fmt lint clean dev release
+.PHONY: all build check test fmt lint clean dev release db-up db-down db-migrate test-integration test-all db-clean db-logs db-connect
 
 # Default task
 all: fmt lint test
@@ -92,3 +92,41 @@ lora-chat:
 # Test without LoRA (base model only)
 base-chat:
 	cargo run --bin kairei -- chat --candle --model-type llama2 --base-model models/tinyllama/model.safetensors --tokenizer models/tokenizer.json --once --message "What is LoRA fine-tuning?"
+
+# ========== Database & Integration Tests ==========
+
+# Start Docker Compose services
+db-up:
+	docker-compose up -d postgres
+	@echo "⏳ Waiting for PostgreSQL to be ready..."
+	@sleep 5
+	@docker-compose ps
+
+# Stop Docker Compose services
+db-down:
+	docker-compose down
+
+# Run database migrations
+db-migrate:
+	cd crates/kairei && sqlx migrate run --source ../../migrations
+
+# Run integration tests with database
+test-integration: db-up db-migrate
+	cargo test -p kairei --test integration_tests -- --test-threads=1 --nocapture
+	@echo "✅ Integration tests completed"
+
+# Run all tests including integration tests
+test-all: test test-integration
+
+# Clean database (remove volumes)
+db-clean:
+	docker-compose down -v
+	@echo "🧹 Database volumes cleaned"
+
+# Show database logs
+db-logs:
+	docker-compose logs -f postgres
+
+# Connect to database with psql
+db-connect:
+	docker-compose exec postgres psql -U kairei_user -d kairei_dev
