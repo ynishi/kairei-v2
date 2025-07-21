@@ -51,13 +51,8 @@ pub enum LoraStatus {
 }
 
 /// LoRA model metadata
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct LoraMetadata {
-    pub name: String,
-    pub base_model_id: Option<BaseModelId>,
-    pub description: Option<String>,
-    pub created_at: String,
-
     // LoRA specific params
     pub rank: Option<usize>,
     pub alpha: Option<f64>,
@@ -88,20 +83,36 @@ pub struct TrainingInfo {
 /// LoRA model representation
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Lora {
+    // Core fields (frequently used for search/display)
     pub id: LoraId,
     pub name: String,
+    pub description: Option<String>,
+    pub base_model_id: Option<BaseModelId>,
+    pub created_at: String,
     pub status: LoraStatus,
+
+    // File information (dynamic)
     pub file_path: Option<String>,
     pub size_bytes: Option<u64>,
+
+    // Additional details
     pub metadata: LoraMetadata,
 }
 
 impl Lora {
     /// Create a new LoRA
-    pub fn new(name: String, metadata: LoraMetadata) -> Self {
+    pub fn new(
+        name: String,
+        description: Option<String>,
+        base_model_id: Option<BaseModelId>,
+        metadata: LoraMetadata,
+    ) -> Self {
         Self {
             id: LoraId::new(),
             name,
+            description,
+            base_model_id,
+            created_at: chrono::Utc::now().to_rfc3339(),
             status: LoraStatus::Available,
             file_path: None,
             size_bytes: None,

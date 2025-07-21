@@ -3,6 +3,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use kairei::base_model::{HuggingFaceDownloader, InMemoryBaseModelRepository};
+use kairei::lora::InMemoryLoraRepository;
 use kairei::storage::LocalStorage;
 use kairei_api::{AppState, build_app, config::AuthConfig};
 use serde_json::{Value, json};
@@ -12,10 +13,17 @@ use tower::util::ServiceExt;
 /// Create a test application with in-memory repository
 fn create_test_app() -> axum::Router {
     let repository = Arc::new(InMemoryBaseModelRepository::new());
+    let lora_repository = Arc::new(InMemoryLoraRepository::new());
     let storage = Arc::new(LocalStorage::new("test_models"));
     let downloader = Arc::new(HuggingFaceDownloader::new(None));
     let auth_config = AuthConfig::default(); // Auth disabled by default
-    let state = AppState::new(repository, storage, downloader, auth_config);
+    let state = AppState::new(
+        repository,
+        lora_repository,
+        storage,
+        downloader,
+        auth_config,
+    );
     build_app(state)
 }
 

@@ -12,6 +12,7 @@ pub use config::ApiConfig;
 
 use crate::config::AuthConfig;
 use kairei::base_model::{BaseModelRepository, BaseModelService, ModelDownloader};
+use kairei::lora::{LoraRepository, LoraService};
 use kairei::storage::Storage;
 use std::sync::Arc;
 
@@ -19,6 +20,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub base_model_service: BaseModelService,
+    pub lora_service: LoraService,
     pub auth_config: AuthConfig,
 }
 
@@ -26,12 +28,15 @@ impl AppState {
     /// Create a new AppState with the given repository, storage and downloader
     pub fn new(
         base_model_repository: Arc<dyn BaseModelRepository>,
+        lora_repository: Arc<dyn LoraRepository>,
         storage: Arc<dyn Storage>,
         downloader: Arc<dyn ModelDownloader>,
         auth_config: AuthConfig,
     ) -> Self {
+        let storage_clone = storage.clone();
         Self {
             base_model_service: BaseModelService::new(base_model_repository, storage, downloader),
+            lora_service: LoraService::new(lora_repository, storage_clone),
             auth_config,
         }
     }

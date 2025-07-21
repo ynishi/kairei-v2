@@ -1,4 +1,5 @@
 use super::{Lora, LoraId, LoraMetadata, LoraRepository, Result};
+use crate::base_model::BaseModelId;
 use crate::storage::Storage;
 use std::sync::Arc;
 
@@ -19,8 +20,14 @@ impl LoraService {
     }
 
     /// Create a new LoRA
-    pub async fn create(&self, name: String, metadata: LoraMetadata) -> Result<Lora> {
-        let lora = Lora::new(name, metadata);
+    pub async fn create(
+        &self,
+        name: String,
+        description: Option<String>,
+        base_model_id: Option<BaseModelId>,
+        metadata: LoraMetadata,
+    ) -> Result<Lora> {
+        let lora = Lora::new(name, description, base_model_id, metadata);
         self.repository.create(lora).await
     }
 
