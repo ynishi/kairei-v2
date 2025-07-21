@@ -151,11 +151,15 @@ impl BaseModelService {
             .as_ref()
             .ok_or_else(|| BaseModelError::InvalidData("Model has no filename".to_string()))?;
 
-        // Check if file exists in storage
+        // Check if file exists in storage with new structure
+        let model_dir = format!("models/{}", model.name);
+        let file_path = format!("{}/{}", model_dir, filename);
+        let meta_path = format!("{}/meta.toml", model_dir);
+
         if !force
             && self
                 .storage
-                .exists(filename)
+                .exists(&file_path)
                 .await
                 .map_err(|e| BaseModelError::InvalidData(format!("Storage error: {}", e)))?
         {
@@ -178,9 +182,9 @@ impl BaseModelService {
             return Ok(());
         }
 
-        // Download the model file
+        // Download the model file with new directory structure
         self.downloader
-            .download(repo_id, filename, self.storage.as_ref(), force)
+            .download_to_model_dir(&model.name, repo_id, filename, self.storage.as_ref(), force)
             .await?;
 
         // Update metadata to mark as downloaded
@@ -197,6 +201,21 @@ impl BaseModelService {
                 architecture: None,
                 quantization: None,
             });
+        }
+
+        // Create meta.toml content using toml serialization
+        if let Some(ref metadata) = updated_model.metadata {
+            let meta_toml = toml::to_string_pretty(metadata).map_err(|e| {
+                BaseModelError::InvalidData(format!("Failed to serialize metadata: {}", e))
+            })?;
+
+            // Save meta.toml
+            self.storage
+                .write(&meta_path, meta_toml.as_bytes())
+                .await
+                .map_err(|e| {
+                    BaseModelError::InvalidData(format!("Failed to write meta.toml: {}", e))
+                })?;
         }
 
         self.repository.update(updated_model).await?;
@@ -230,10 +249,10 @@ impl BaseModelService {
             "config.json",
         ];
 
-        // Download model files
+        // Download model files with new directory structure
         let downloaded_files = self
             .downloader
-            .download_files(&repo_id, &patterns, self.storage.as_ref(), force)
+            .download_files_to_model_dir(&name, &repo_id, &patterns, self.storage.as_ref(), force)
             .await?;
 
         // Find the main model file (largest one typically)
@@ -241,7 +260,71 @@ impl BaseModelService {
             .iter()
             .find(|f| f.ends_with(".safetensors") || f.ends_with(".bin") || f.ends_with(".gguf"))
             .cloned()
-            .or_else(|| downloaded_files.first().cloned());
+            .or_else(|| downloaded_files.first().cloned())
+            .and_then(|path| {
+                // Extract just the filename from the full path
+                path.split('/').last().map(|s| s.to_string())
+            });
+
+        // Try to read config.json to get model information
+        let mut architecture = None;
+        let mut parameters = None;
+
+        let config_path = format!("models/{}/config.json", name);
+        if let Ok(config_content) = self.storage.read(&config_path).await {
+            if let Ok(config_str) = String::from_utf8(config_content) {
+                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_str) {
+                    // Extract architecture info
+                    if let Some(arch_value) = config.get("architectures") {
+                        if let Some(arch_array) = arch_value.as_array() {
+                            if let Some(first_arch) = arch_array.first() {
+                                architecture = first_arch.as_str().map(|s| s.to_string());
+                            }
+                        }
+                    }
+
+                    // Try to estimate model size from parameters
+                    if let Some(hidden_size) = config.get("hidden_size").and_then(|v| v.as_u64()) {
+                        if let Some(num_layers) =
+                            config.get("num_hidden_layers").and_then(|v| v.as_u64())
+                        {
+                            let approx_params = (hidden_size * num_layers * 4) / 1_000_000; // Very rough estimate
+                            if approx_params < 1000 {
+                                parameters = Some(format!("~{}M", approx_params));
+                            } else {
+                                parameters =
+                                    Some(format!("~{:.1}B", approx_params as f64 / 1000.0));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Create metadata
+        let metadata = BaseModelMetadata {
+            repo_id: repo_id.clone(),
+            name: name.clone(),
+            description: Some(format!("Downloaded from HuggingFace: {}", repo_id)),
+            downloaded_at: Some(chrono::Utc::now().to_rfc3339()),
+            parameters,
+            architecture,
+            quantization: None,
+        };
+
+        // Create meta.toml content using toml serialization
+        let meta_toml = toml::to_string_pretty(&metadata).map_err(|e| {
+            BaseModelError::InvalidData(format!("Failed to serialize metadata: {}", e))
+        })?;
+
+        // Save meta.toml
+        let meta_path = format!("models/{}/meta.toml", name);
+        self.storage
+            .write(&meta_path, meta_toml.as_bytes())
+            .await
+            .map_err(|e| {
+                BaseModelError::InvalidData(format!("Failed to write meta.toml: {}", e))
+            })?;
 
         // Register the model
         let model = self
@@ -251,15 +334,7 @@ impl BaseModelService {
                 Some(repo_id.clone()),
                 main_file,
                 None, // Size could be calculated from files
-                Some(BaseModelMetadata {
-                    repo_id: repo_id.clone(),
-                    name: name.clone(),
-                    description: Some(format!("Downloaded from HuggingFace: {}", repo_id)),
-                    downloaded_at: Some(chrono::Utc::now().to_rfc3339()),
-                    parameters: None,
-                    architecture: None,
-                    quantization: None,
-                }),
+                Some(metadata),
             )
             .await?;
 

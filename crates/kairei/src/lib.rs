@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod base_model;
+pub mod config;
 pub mod error;
 pub mod storage;
 

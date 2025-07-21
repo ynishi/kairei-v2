@@ -1,3 +1,4 @@
+use kairei::config::{AuthConfig as KaireiAuthConfig, KaireiConfig};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -52,6 +53,22 @@ impl ApiConfig {
 
         serde_json::from_str(&content)
             .map_err(|e| anyhow::anyhow!("Failed to parse config file: {}", e))
+    }
+
+    /// Convert to KaireiConfig
+    pub fn to_kairei_config(&self) -> KaireiConfig {
+        KaireiConfig {
+            log_level: self.log_level.clone(),
+            auth: KaireiAuthConfig {
+                enabled: self.auth.enabled,
+                auth0_domain: self.auth.auth0_domain.clone(),
+                auth0_audience: self.auth.auth0_audience.clone(),
+                issuer: self.auth.issuer.clone(),
+                algorithms: self.auth.algorithms.clone(),
+                required_scopes: self.auth.required_scopes.clone(),
+            },
+            ..Default::default()
+        }
     }
 }
 

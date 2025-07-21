@@ -5,6 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::traits::FileMetadata;
 use super::{Storage, StorageResult};
+use crate::config::KaireiConfig;
 
 /// Local filesystem storage implementation
 #[derive(Debug, Clone)]
@@ -18,6 +19,11 @@ impl LocalStorage {
         Self {
             base_path: base_path.as_ref().to_path_buf(),
         }
+    }
+
+    /// Create LocalStorage from KaireiConfig
+    pub fn from_config(config: &KaireiConfig) -> Self {
+        Self::new(&config.base_dir)
     }
 
     /// Get full path by joining base path with relative path
