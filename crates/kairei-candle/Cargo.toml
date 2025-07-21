@@ -15,7 +15,7 @@ candle-transformers = { git = "https://github.com/huggingface/candle.git" }
 candle-lora = { git = "https://github.com/ynishi/candle-lora.git" }
 candle-lora-macro = { git = "https://github.com/ynishi/candle-lora.git" }
 candle-lora-transformers = { git = "https://github.com/ynishi/candle-lora.git" }
-hf-hub = { version = "0.3", features = ["tokio"] }
+hf-hub = { version = "0.4", features = ["tokio"] }
 kairei-core = { path = "../kairei-core" }
 rand = "0.8"
 regex = "1"
