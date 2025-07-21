@@ -143,6 +143,75 @@ impl LoraService {
         Ok(())
     }
 
+    /// Create a new LoRA with source file
+    pub async fn create_with_source(
+        &self,
+        source_path: &str,
+        name: String,
+        description: Option<String>,
+        base_model_id: Option<BaseModelId>,
+        metadata: LoraMetadata,
+    ) -> Result<Lora> {
+        // Create LoRA directory
+        let lora_dir = format!("{}/{}", self.config.loras_dir, name);
+
+        // Check if LoRA already exists
+        if self.storage.exists(&lora_dir).await? {
+            return Err(LoraError::AlreadyExists(name));
+        }
+
+        // Create directory
+        self.storage.create_dir(&lora_dir).await?;
+
+        // Copy source file to adapter.safetensors
+        let adapter_path = format!("{}/adapter.safetensors", lora_dir);
+
+        // Read source file
+        let source_content = self.storage.read(source_path).await.inspect_err(|e| {
+            // Clean up directory on error
+            let _ = self.storage.delete(&lora_dir);
+        })?;
+
+        // Write adapter file
+        self.storage
+            .write(&adapter_path, &source_content)
+            .await
+            .inspect_err(|e| {
+                // Clean up directory on error
+                let _ = self.storage.delete(&lora_dir);
+            })?;
+
+        // Get file size
+        let file_metadata = self.storage.metadata(&adapter_path).await?;
+
+        // Create LoRA entity with file information
+        let mut lora = Lora::new(name, description, base_model_id, metadata);
+        lora.file_path = Some(adapter_path);
+        lora.size_bytes = Some(file_metadata.size);
+
+        // Save the entire Lora entity to meta.toml
+        let meta_path = format!("{}/meta.toml", lora_dir);
+        let meta_toml = toml::to_string_pretty(&lora).map_err(|e| {
+            // Clean up directory on error
+            let _ = self.storage.delete(&lora_dir);
+            LoraError::InvalidMetadata(format!("Failed to serialize LoRA: {}", e))
+        })?;
+
+        self.storage
+            .write(&meta_path, meta_toml.as_bytes())
+            .await
+            .inspect_err(|e| {
+                // Clean up directory on error
+                let _ = self.storage.delete(&lora_dir);
+            })?;
+
+        // Create in repository
+        self.repository.create(lora).await.inspect_err(|e| {
+            // Clean up directory on error
+            let _ = self.storage.delete(&lora_dir);
+        })
+    }
+
     /// Scan directory and register existing LoRAs
     pub async fn scan_and_register(&self) -> Result<Vec<Lora>> {
         self.ensure_directories().await?;
