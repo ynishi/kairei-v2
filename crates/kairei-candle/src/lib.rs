@@ -12,6 +12,7 @@ pub use llama2_lora::{Config as Llama2Config, Llama2LoraProcessor};
 pub use llama2c_processor::{Llama2CProcessor, Llama2CProcessorBuilder};
 pub use llama3_lora::{Config as Llama3Config, Llama3LoraProcessor};
 pub use model::{CandleModel, ModelConfig};
+pub use models::lora::convert_peft_to_candle_lora;
 
 /// Initialize the candle backend
 pub fn init() {

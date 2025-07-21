@@ -246,6 +246,7 @@ async fn main() -> Result<(), CliError> {
                     prefix,
                 }) => {
                     commands::convert_peft_to_candle_lora(
+                        &service,
                         peft_dir.clone(),
                         output.clone(),
                         Some(prefix.clone()),

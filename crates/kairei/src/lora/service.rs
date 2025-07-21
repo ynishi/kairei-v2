@@ -266,4 +266,33 @@ impl LoraService {
 
         Ok(registered)
     }
+
+    /// Convert PEFT format LoRA to candle-lora format
+    #[cfg(feature = "candle")]
+    pub async fn convert_peft_to_candle_lora(
+        &self,
+        peft_dir: &str,
+        output_path: &str,
+        prefix: Option<String>,
+    ) -> Result<()> {
+        use kairei_candle::convert_peft_to_candle_lora as candle_convert;
+
+        candle_convert(peft_dir, output_path, prefix)
+            .map_err(|e| LoraError::ConversionError(format!("PEFT to candle-lora conversion failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Convert PEFT format LoRA to candle-lora format (no-op when candle feature is disabled)
+    #[cfg(not(feature = "candle"))]
+    pub async fn convert_peft_to_candle_lora(
+        &self,
+        _peft_dir: &str,
+        _output_path: &str,
+        _prefix: Option<String>,
+    ) -> Result<()> {
+        Err(LoraError::ConversionError(
+            "Candle feature is not enabled. Enable the 'candle' feature to use this functionality.".to_string()
+        ))
+    }
 }

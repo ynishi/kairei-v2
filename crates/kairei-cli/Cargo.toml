@@ -11,8 +11,6 @@ description = "CLI for Kairei-v2 AgentCulture Framework"
 kairei = { path = "../kairei", features = ["candle"] }
 kairei-candle = { path = "../kairei-candle" }
 candle-core = { git = "https://github.com/huggingface/candle.git" }
-candle-lora = { git = "https://github.com/ynishi/candle-lora.git" }
-candle-lora-transformers = { git = "https://github.com/ynishi/candle-lora.git" }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 thiserror = "1"

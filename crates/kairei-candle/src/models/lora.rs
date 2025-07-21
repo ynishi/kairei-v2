@@ -520,3 +520,24 @@ impl Tuner for CandleLoRATuner {
         }
     }
 }
+
+/// Convert PEFT format LoRA to candle-lora format
+pub fn convert_peft_to_candle_lora(
+    peft_dir: &str,
+    output_path: &str,
+    prefix: Option<String>,
+) -> Result<()> {
+    use candle_lora::convert_peft_dir_to_candle_lora_typed;
+
+    // Note: prefix is ignored in the typed conversion as it automatically determines prefixes
+    if prefix.is_some() {
+        eprintln!(
+            "Note: prefix parameter is ignored in typed conversion (auto-determined by layer type)"
+        );
+    }
+
+    let device = Device::Cpu;
+    
+    // Use the new typed conversion function with dummy embeddings enabled
+    convert_peft_dir_to_candle_lora_typed(peft_dir, output_path, &device, true)
+}
