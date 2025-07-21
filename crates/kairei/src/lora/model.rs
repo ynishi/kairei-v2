@@ -89,7 +89,9 @@ pub struct Lora {
     pub description: Option<String>,
     pub base_model_id: Option<BaseModelId>,
     pub created_at: String,
+    pub updated_at: String,
     pub status: LoraStatus,
+    pub archived: bool,
 
     // File information (dynamic)
     pub file_path: Option<String>,
@@ -107,13 +109,16 @@ impl Lora {
         base_model_id: Option<BaseModelId>,
         metadata: LoraMetadata,
     ) -> Self {
+        let now = chrono::Utc::now().to_rfc3339();
         Self {
             id: LoraId::new(),
             name,
             description,
             base_model_id,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: now.clone(),
+            updated_at: now,
             status: LoraStatus::Available,
+            archived: false,
             file_path: None,
             size_bytes: None,
             metadata,
