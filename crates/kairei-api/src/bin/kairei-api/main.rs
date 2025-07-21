@@ -1,6 +1,8 @@
 use clap::Parser;
+use kairei::base_model::InMemoryBaseModelRepository;
 use kairei_api::{ApiConfig, AppState, build_app};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -70,8 +72,9 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = config.socket_addr()?;
 
-    // Initialize application state
-    let state = AppState::default();
+    // Initialize repository and application state
+    let base_model_repository = Arc::new(InMemoryBaseModelRepository::new());
+    let state = AppState::new(base_model_repository);
 
     // Build application
     let app = build_app(state);

@@ -4,6 +4,7 @@
 //! abstractions for building LLM applications and agents.
 
 pub mod app;
+pub mod base_model;
 pub mod error;
 
 // Re-export core types
@@ -14,6 +15,9 @@ pub use kairei_core::{
 
 // Re-export app types
 pub use app::{AppMetadata, AppMode, KaireiApp, KaireiAppBuilder};
+
+// Re-export base model types
+pub use base_model::{BaseModel, BaseModelId, BaseModelMetadata};
 
 // Re-export error types
 pub use error::{KaireiError, Result as KaireiResult};

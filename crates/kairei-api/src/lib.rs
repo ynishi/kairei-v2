@@ -9,25 +9,48 @@ pub mod routes;
 
 pub use config::ApiConfig;
 
+use kairei::base_model::{BaseModelRepository, BaseModelService};
+use std::sync::Arc;
+
 /// Application state
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct AppState {
-    // Add future fields here
-    // pub db_pool: DatabasePool,
-    // pub model_manager: ModelManager,
-    // pub config: AppConfig,
+    pub base_model_service: BaseModelService,
+}
+
+impl AppState {
+    /// Create a new AppState with the given repository
+    pub fn new(base_model_repository: Arc<dyn BaseModelRepository>) -> Self {
+        Self {
+            base_model_service: BaseModelService::new(base_model_repository),
+        }
+    }
 }
 
 #[derive(OpenApi)]
 #[openapi(
     paths(
         crate::routes::health::health_check,
+        crate::routes::v1::base_model::list_models,
+        crate::routes::v1::base_model::get_model,
+        crate::routes::v1::base_model::create_model,
+        crate::routes::v1::base_model::update_model,
+        crate::routes::v1::base_model::delete_model,
     ),
     components(
-        schemas(crate::routes::health::HealthResponse)
+        schemas(
+            crate::routes::health::HealthResponse,
+            crate::routes::v1::base_model::ModelDto,
+            crate::routes::v1::base_model::ModelStatus,
+            crate::routes::v1::base_model::ListModelsResponse,
+            crate::routes::v1::base_model::CreateModelRequest,
+            crate::routes::v1::base_model::UpdateModelRequest,
+            crate::routes::v1::base_model::BaseModelMetadataDto,
+        )
     ),
     tags(
-        (name = "health", description = "Health check endpoints")
+        (name = "health", description = "Health check endpoints"),
+        (name = "models", description = "Model management endpoints")
     )
 )]
 pub struct ApiDoc;

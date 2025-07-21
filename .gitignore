@@ -19,6 +19,7 @@ debug/
 /logs/
 /examples/output/
 /temp/
+/workspace/
 
 # LoRA development
 /loras/
