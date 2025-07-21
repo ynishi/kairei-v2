@@ -86,14 +86,3 @@ impl Default for AuthConfig {
         }
     }
 }
-
-// Conversion from ApiConfig to KaireiConfig for kairei-api integration
-#[cfg(feature = "api-config")]
-impl From<crate::api::config::ApiConfig> for KaireiConfig {
-    fn from(api_config: crate::api::config::ApiConfig) -> Self {
-        Self {
-            auth: api_config.auth,
-            ..Default::default()
-        }
-    }
-}

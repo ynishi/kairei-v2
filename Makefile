@@ -12,8 +12,9 @@ check:
 	cargo check
 
 # Run tests
-test:
-	cargo test
+test: db-up db-migrate
+	cargo test --quiet -- --test-threads=1 --nocapture
+	@echo "✅ All tests passed"
 
 # Format
 fmt:
@@ -115,9 +116,6 @@ test-integration: db-up db-migrate
 	cargo test -p kairei --test integration_tests -- --test-threads=1 --nocapture
 	@echo "✅ Integration tests completed"
 
-# Run all tests including integration tests
-test-all: test test-integration
-
 # Clean database (remove volumes)
 db-clean:
 	docker-compose down -v
@@ -139,7 +137,7 @@ api-run: db-up
 	
 # Run API server with watch mode (requires cargo-watch)
 api-watch: db-up
-	cd crates/kairei-api && cargo watch -x run
+	cargo watch -x run -p kairei-api --bin kairei-api
 
 # Build API server
 api-build:

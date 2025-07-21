@@ -124,10 +124,10 @@ mod tests {
         let model = BaseModel {
             id: BaseModelId::new(),
             name: "test-model".to_string(),
-            description: "Test model".to_string(),
-            repo_id: "test/repo".to_string(),
-            filename: "model.bin".to_string(),
-            size_mb: 100,
+            description: Some("Test model".to_string()),
+            repo_id: Some("test/repo".to_string()),
+            filename: Some("model.bin".to_string()),
+            size_mb: Some(100),
             metadata: None,
         };
 
@@ -145,10 +145,10 @@ mod tests {
         let model = BaseModel {
             id: BaseModelId::new(),
             name: "unique-model".to_string(),
-            description: "Unique model".to_string(),
-            repo_id: "test/repo".to_string(),
-            filename: "model.bin".to_string(),
-            size_mb: 100,
+            description: Some("Unique model".to_string()),
+            repo_id: Some("test/repo".to_string()),
+            filename: Some("model.bin".to_string()),
+            size_mb: Some(100),
             metadata: None,
         };
 
@@ -165,21 +165,21 @@ mod tests {
         let mut model = BaseModel {
             id: BaseModelId::new(),
             name: "original-name".to_string(),
-            description: "Original description".to_string(),
-            repo_id: "test/repo".to_string(),
-            filename: "model.bin".to_string(),
-            size_mb: 100,
+            description: Some("Original description".to_string()),
+            repo_id: Some("test/repo".to_string()),
+            filename: Some("model.bin".to_string()),
+            size_mb: Some(100),
             metadata: None,
         };
 
         repo.create(model.clone()).await.unwrap();
 
         model.name = "updated-name".to_string();
-        model.description = "Updated description".to_string();
+        model.description = Some("Updated description".to_string());
 
         let updated = repo.update(model.clone()).await.unwrap();
         assert_eq!(updated.name, "updated-name");
-        assert_eq!(updated.description, "Updated description");
+        assert_eq!(updated.description, Some("Updated description".to_string()));
     }
 
     #[tokio::test]
@@ -189,10 +189,10 @@ mod tests {
         let model = BaseModel {
             id: BaseModelId::new(),
             name: "to-delete".to_string(),
-            description: "Will be deleted".to_string(),
-            repo_id: "test/repo".to_string(),
-            filename: "model.bin".to_string(),
-            size_mb: 100,
+            description: Some("Will be deleted".to_string()),
+            repo_id: Some("test/repo".to_string()),
+            filename: Some("model.bin".to_string()),
+            size_mb: Some(100),
             metadata: None,
         };
 

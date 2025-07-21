@@ -94,10 +94,6 @@ mod tests {
 
     fn create_test_metadata() -> LoraMetadata {
         LoraMetadata {
-            name: "test-lora".to_string(),
-            base_model_id: None,
-            description: Some("Test LoRA".to_string()),
-            created_at: chrono::Utc::now().to_rfc3339(),
             rank: Some(16),
             alpha: Some(32.0),
             training_info: None,
@@ -111,7 +107,7 @@ mod tests {
     async fn test_create_and_get() {
         let repo = InMemoryLoraRepository::new();
         let metadata = create_test_metadata();
-        let lora = Lora::new("test-lora".to_string(), metadata);
+        let lora = Lora::new("test-lora".to_string(), None, None, metadata);
         let id = lora.id.clone();
 
         // Create
@@ -132,8 +128,8 @@ mod tests {
     async fn test_duplicate_name_error() {
         let repo = InMemoryLoraRepository::new();
         let metadata = create_test_metadata();
-        let lora1 = Lora::new("test-lora".to_string(), metadata.clone());
-        let lora2 = Lora::new("test-lora".to_string(), metadata);
+        let lora1 = Lora::new("test-lora".to_string(), None, None, metadata.clone());
+        let lora2 = Lora::new("test-lora".to_string(), None, None, metadata);
 
         repo.create(lora1).await.unwrap();
         let result = repo.create(lora2).await;
@@ -145,7 +141,7 @@ mod tests {
     async fn test_update() {
         let repo = InMemoryLoraRepository::new();
         let metadata = create_test_metadata();
-        let mut lora = Lora::new("test-lora".to_string(), metadata);
+        let mut lora = Lora::new("test-lora".to_string(), None, None, metadata);
         let id = lora.id.clone();
 
         repo.create(lora.clone()).await.unwrap();
@@ -164,7 +160,7 @@ mod tests {
     async fn test_delete() {
         let repo = InMemoryLoraRepository::new();
         let metadata = create_test_metadata();
-        let lora = Lora::new("test-lora".to_string(), metadata);
+        let lora = Lora::new("test-lora".to_string(), None, None, metadata);
         let id = lora.id.clone();
 
         repo.create(lora).await.unwrap();
@@ -179,8 +175,8 @@ mod tests {
         let repo = InMemoryLoraRepository::new();
         let metadata = create_test_metadata();
 
-        let lora1 = Lora::new("lora1".to_string(), metadata.clone());
-        let lora2 = Lora::new("lora2".to_string(), metadata);
+        let lora1 = Lora::new("lora1".to_string(), None, None, metadata.clone());
+        let lora2 = Lora::new("lora2".to_string(), None, None, metadata);
 
         repo.create(lora1).await.unwrap();
         repo.create(lora2).await.unwrap();
