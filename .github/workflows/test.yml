@@ -38,7 +38,7 @@ jobs:
         toolchain: stable
     
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -49,7 +49,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Install SQLx CLI from cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: sqlx-cache
       with:
         path: ~/.cargo/bin/sqlx
@@ -107,7 +107,7 @@ jobs:
         toolchain: stable
     
     - name: Cache dependencies
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/bin/
@@ -118,7 +118,7 @@ jobs:
         key: ${{ runner.os }}-cargo-integration-${{ hashFiles('**/Cargo.lock') }}
     
     - name: Install SQLx CLI from cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       id: sqlx-cache
       with:
         path: ~/.cargo/bin/sqlx
