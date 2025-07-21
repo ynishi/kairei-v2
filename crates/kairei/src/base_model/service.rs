@@ -4,6 +4,7 @@ use super::{
     BaseModel, BaseModelError, BaseModelId, BaseModelMetadata, BaseModelRepository,
     BaseModelResult, ModelDownloader,
 };
+use crate::config::KaireiConfig;
 use crate::storage::Storage;
 
 /// Service layer for BaseModel operations
@@ -12,6 +13,7 @@ pub struct BaseModelService {
     repository: Arc<dyn BaseModelRepository>,
     storage: Arc<dyn Storage>,
     downloader: Arc<dyn ModelDownloader>,
+    config: KaireiConfig,
 }
 
 impl BaseModelService {
@@ -25,6 +27,22 @@ impl BaseModelService {
             repository,
             storage,
             downloader,
+            config: KaireiConfig::default(),
+        }
+    }
+
+    /// Create a new BaseModelService with config
+    pub fn with_config(
+        repository: Arc<dyn BaseModelRepository>,
+        storage: Arc<dyn Storage>,
+        downloader: Arc<dyn ModelDownloader>,
+        config: KaireiConfig,
+    ) -> Self {
+        Self {
+            repository,
+            storage,
+            downloader,
+            config,
         }
     }
 
@@ -152,7 +170,7 @@ impl BaseModelService {
             .ok_or_else(|| BaseModelError::InvalidData("Model has no filename".to_string()))?;
 
         // Check if file exists in storage with new structure
-        let model_dir = format!("models/{}", model.name);
+        let model_dir = format!("{}/{}", self.config.models_dir, model.name);
         let file_path = format!("{}/{}", model_dir, filename);
         let meta_path = format!("{}/meta.toml", model_dir);
 
@@ -270,7 +288,7 @@ impl BaseModelService {
         let mut architecture = None;
         let mut parameters = None;
 
-        let config_path = format!("models/{}/config.json", name);
+        let config_path = format!("{}/{}/config.json", self.config.models_dir, name);
         if let Ok(config_content) = self.storage.read(&config_path).await {
             if let Ok(config_str) = String::from_utf8(config_content) {
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_str) {
@@ -318,7 +336,7 @@ impl BaseModelService {
         })?;
 
         // Save meta.toml
-        let meta_path = format!("models/{}/meta.toml", name);
+        let meta_path = format!("{}/{}/meta.toml", self.config.models_dir, name);
         self.storage
             .write(&meta_path, meta_toml.as_bytes())
             .await
@@ -355,5 +373,90 @@ impl BaseModelService {
         }
 
         Ok(downloaded_models)
+    }
+
+    /// Scan storage for models and register them in the repository
+    pub async fn scan_and_register_models(&self) -> BaseModelResult<Vec<BaseModel>> {
+        let mut registered_models = Vec::new();
+
+        // List all directories in models/
+        let models_dir = &self.config.models_dir;
+        let entries = self.storage.list(models_dir).await.map_err(|e| {
+            BaseModelError::InvalidData(format!("Failed to list models directory: {}", e))
+        })?;
+
+        for entry in entries {
+            // Skip if not a directory (only process directories one level deep)
+            if !entry.ends_with('/') {
+                continue;
+            }
+
+            // Extract model name from path (remove "models/" prefix and trailing "/")
+            let model_name = entry
+                .strip_prefix(&format!("{}/", models_dir))
+                .unwrap_or(&entry)
+                .trim_end_matches('/')
+                .to_string();
+
+            // Skip if model already exists
+            if self.repository.exists_by_name(&model_name).await? {
+                println!("⏭️  Model '{}' already registered, skipping...", model_name);
+                continue;
+            }
+
+            // Check for meta.toml
+            let meta_path = format!("{}/{}/meta.toml", models_dir, model_name);
+            if !self
+                .storage
+                .exists(&meta_path)
+                .await
+                .map_err(|e| BaseModelError::InvalidData(format!("Storage error: {}", e)))?
+            {
+                println!("⚠️  No meta.toml found for '{}', skipping...", model_name);
+                continue;
+            }
+
+            // Read and parse meta.toml
+            let meta_content = self.storage.read(&meta_path).await.map_err(|e| {
+                BaseModelError::InvalidData(format!("Failed to read meta.toml: {}", e))
+            })?;
+            let meta_str = String::from_utf8(meta_content).map_err(|e| {
+                BaseModelError::InvalidData(format!("Invalid UTF-8 in meta.toml: {}", e))
+            })?;
+            let metadata: BaseModelMetadata = toml::from_str(&meta_str).map_err(|e| {
+                BaseModelError::InvalidData(format!("Failed to parse meta.toml: {}", e))
+            })?;
+
+            // Find the main model file
+            let model_dir_path = format!("{}/{}", models_dir, model_name);
+            let model_files = self.storage.list(&model_dir_path).await.map_err(|e| {
+                BaseModelError::InvalidData(format!("Failed to list model directory: {}", e))
+            })?;
+
+            let main_file = model_files
+                .iter()
+                .find(|f| {
+                    f.ends_with(".safetensors") || f.ends_with(".bin") || f.ends_with(".gguf")
+                })
+                .and_then(|f| f.split('/').last())
+                .map(|s| s.to_string());
+
+            // Register the model
+            let model = self
+                .register_model(
+                    model_name.clone(),
+                    metadata.description.clone(),
+                    Some(metadata.repo_id.clone()),
+                    main_file,
+                    None, // size_mb can be calculated later if needed
+                    Some(metadata),
+                )
+                .await?;
+
+            println!("✅ Registered model: {}", model_name);
+            registered_models.push(model);
+        }
+
+        Ok(registered_models)
     }
 }

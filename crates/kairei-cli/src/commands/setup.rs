@@ -1,9 +1,7 @@
 //! Setup command handler
 
 use crate::error::CliError;
-use kairei::base_model::{
-    BaseModelService, HuggingFaceDownloader, InMemoryBaseModelRepository,
-};
+use kairei::base_model::{BaseModelService, HuggingFaceDownloader, InMemoryBaseModelRepository};
 use kairei::config::KaireiConfig;
 use kairei::storage::LocalStorage;
 use std::fs;
@@ -13,6 +11,7 @@ use std::sync::Arc;
 pub async fn run_setup(
     list: bool,
     force: bool,
+    scan: bool,
     name: Option<String>,
     repo_id: Option<String>,
 ) -> Result<(), CliError> {
@@ -21,7 +20,32 @@ pub async fn run_setup(
     let repository = Arc::new(InMemoryBaseModelRepository::new());
     let storage = Arc::new(LocalStorage::from_config(&config));
     let downloader = Arc::new(HuggingFaceDownloader::new(None)); // No API token for now
-    let service = BaseModelService::new(repository, storage, downloader);
+    let service =
+        BaseModelService::with_config(repository.clone(), storage, downloader, config.clone());
+
+    if scan {
+        // Scan models directory and register found models
+        println!("🔍 Scanning models directory for existing models...");
+        let registered_models = service
+            .scan_and_register_models()
+            .await
+            .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+        println!();
+        if registered_models.is_empty() {
+            println!("No new models found to register.");
+        } else {
+            println!(
+                "✅ Successfully registered {} models:",
+                registered_models.len()
+            );
+            for model in &registered_models {
+                println!("  - {}", model.name);
+            }
+        }
+        return Ok(());
+    }
+
     if list {
         list_models(&service).await?;
         return Ok(());
@@ -67,6 +91,9 @@ pub async fn run_setup(
         println!("🎯 No model specified. Use one of the following:");
         println!("  kairei setup <name> <repo-id>    # Download custom model from HuggingFace");
         println!("  kairei setup --list              # List all registered models");
+        println!(
+            "  kairei setup --scan              # Scan models directory and register found models"
+        );
         return Ok(());
     }
 

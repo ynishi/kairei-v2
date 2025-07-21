@@ -106,6 +106,9 @@ enum Commands {
         /// Force re-download even if file exists
         #[arg(long, short)]
         force: bool,
+        /// Scan models directory and register found models
+        #[arg(long)]
+        scan: bool,
         /// Custom name for the model (used with HuggingFace repo ID)
         #[arg(value_name = "NAME")]
         name: Option<String>,
@@ -194,10 +197,11 @@ async fn main() -> Result<(), CliError> {
         Some(Commands::Setup {
             list,
             force,
+            scan,
             name,
             repo_id,
         }) => {
-            commands::run_setup(*list, *force, name.clone(), repo_id.clone()).await?;
+            commands::run_setup(*list, *force, *scan, name.clone(), repo_id.clone()).await?;
         }
         Some(Commands::Lora { command }) => match command {
             Some(LoraCommands::Add {

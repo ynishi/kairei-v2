@@ -83,7 +83,14 @@ impl Storage for LocalStorage {
 
         while let Some(entry) = read_dir.next_entry().await? {
             if let Ok(relative) = entry.path().strip_prefix(&self.base_path) {
-                entries.push(relative.to_string_lossy().to_string());
+                let mut path_str = relative.to_string_lossy().to_string();
+
+                // Add trailing slash for directories
+                if entry.path().is_dir() {
+                    path_str.push('/');
+                }
+
+                entries.push(path_str);
             }
         }
 
