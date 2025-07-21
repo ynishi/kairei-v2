@@ -1,4 +1,5 @@
 use crate::error::CliError;
+use kairei::lora::LoraService;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -30,14 +31,18 @@ struct LoraMetadata {
     training_framework: Option<String>,
 }
 
-pub async fn setup_lora() -> Result<(), CliError> {
+pub async fn setup_lora(service: &LoraService) -> Result<(), CliError> {
     println!("🔧 Setting up LoRA development environment...");
 
-    // Define directories to create
-    let directories = vec!["loras", "lora_datasets", "base_models"];
+    // Ensure LoRA directories exist through service
+    service
+        .ensure_directories()
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Failed to create directories: {}", e)))?;
 
-    // Create each directory
-    for dir in &directories {
+    // Also create additional directories that might not be managed by the service
+    let additional_dirs = vec!["lora_datasets", "base_models"];
+    for dir in &additional_dirs {
         let path = Path::new(dir);
         if path.exists() {
             println!("✅ {} already exists", dir);
@@ -55,71 +60,30 @@ pub async fn setup_lora() -> Result<(), CliError> {
     Ok(())
 }
 
-pub async fn lora_list() -> Result<(), CliError> {
+pub async fn lora_list(service: &LoraService) -> Result<(), CliError> {
     println!("📋 Listing all registered LoRA models...\n");
 
-    let loras_dir = Path::new("loras");
-    if !loras_dir.exists() {
-        println!("❌ LoRA environment not initialized. Please run: kairei setup lora");
-        return Ok(());
-    }
+    // Get all LoRAs from service
+    let loras = service
+        .list()
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Failed to list LoRAs: {}", e)))?;
 
-    let mut lora_list = Vec::new();
-
-    // Read all directories in loras/
-    let entries = fs::read_dir(loras_dir)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to read loras directory: {}", e)))?;
-
-    for entry in entries {
-        let entry = entry.map_err(|e| {
-            CliError::InvalidInput(format!("Failed to read directory entry: {}", e))
-        })?;
-
-        let path = entry.path();
-        if path.is_dir() {
-            // Try to read meta.toml
-            let meta_path = path.join("meta.toml");
-            if meta_path.exists() {
-                match fs::read_to_string(&meta_path) {
-                    Ok(content) => {
-                        match toml::from_str::<LoraMetadata>(&content) {
-                            Ok(metadata) => {
-                                // Check if the actual LoRA file exists
-                                let lora_file = path.join("adapter.safetensors");
-                                let file_exists = lora_file.exists();
-
-                                lora_list.push((metadata, file_exists));
-                            }
-                            Err(_) => {
-                                // Invalid metadata, skip
-                                continue;
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        // Can't read metadata, skip
-                        continue;
-                    }
-                }
-            }
-        }
-    }
-
-    if lora_list.is_empty() {
+    if loras.is_empty() {
         println!("No LoRA models found. Add one with: kairei lora add <source>");
     } else {
-        println!("Found {} LoRA model(s):", lora_list.len());
+        println!("Found {} LoRA model(s):", loras.len());
         println!("─────────────────────────────────────────");
 
-        for (metadata, file_exists) in lora_list {
-            println!("📦 {}", metadata.name);
-            if let Some(base_model) = &metadata.base_model {
-                println!("   🧠 Base: {}", base_model);
+        for lora in loras {
+            println!("📦 {}", lora.name);
+            if let Some(base_model_id) = &lora.base_model_id {
+                println!("   🧠 Base: {}", base_model_id);
             }
-            if let Some(desc) = &metadata.description {
+            if let Some(desc) = &lora.description {
                 println!("   📝 {}", desc);
             }
-            if !file_exists {
+            if lora.file_path.is_none() {
                 println!("   ⚠️  adapter.safetensors missing!");
             }
             println!();
@@ -131,6 +95,7 @@ pub async fn lora_list() -> Result<(), CliError> {
 
 // Add a LoRA model to the registry
 pub async fn lora_add(
+    service: &LoraService,
     source: &str,
     name: Option<String>,
     base_model: Option<String>,
@@ -231,154 +196,57 @@ pub async fn lora_add(
 }
 
 // Show information about a specific LoRA
-pub async fn lora_show(name: &str) -> Result<(), CliError> {
-    let lora_dir = Path::new("loras").join(name);
-    if !lora_dir.exists() {
-        return Err(CliError::InvalidInput(format!("LoRA '{}' not found", name)));
-    }
+pub async fn lora_show(service: &LoraService, name: &str) -> Result<(), CliError> {
+    // Get LoRA from service by name
+    let lora = service
+        .get_by_name(name)
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Failed to get LoRA: {}", e)))?
+        .ok_or_else(|| CliError::InvalidInput(format!("LoRA '{}' not found", name)))?;
 
-    // Read metadata
-    let meta_path = lora_dir.join("meta.toml");
-    if !meta_path.exists() {
-        return Err(CliError::InvalidInput(format!(
-            "Metadata not found for LoRA '{}'",
-            name
-        )));
-    }
-
-    let meta_content = fs::read_to_string(&meta_path)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to read metadata: {}", e)))?;
-    let metadata: LoraMetadata = toml::from_str(&meta_content)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to parse metadata: {}", e)))?;
-
-    // Check if LoRA file exists
-    let lora_file = lora_dir.join("adapter.safetensors");
-    let file_exists = lora_file.exists();
-    let file_size = if file_exists {
-        fs::metadata(&lora_file).ok().map(|m| m.len())
-    } else {
-        None
-    };
-
-    // Display information
-    println!("📦 LoRA: {}", metadata.name);
+    // Display as TOML
+    println!("📦 LoRA: {}", lora.name);
     println!("─────────────────────────────────────────");
 
-    if let Some(base_model) = &metadata.base_model {
-        println!("🧠 Base Model: {}", base_model);
-    }
+    let lora_toml = toml::to_string_pretty(&lora)
+        .map_err(|e| CliError::InvalidInput(format!("Failed to serialize LoRA: {}", e)))?;
 
-    if let Some(desc) = &metadata.description {
-        println!("📝 Description: {}", desc);
-    }
-
-    if let Some(created) = &metadata.created_at {
-        println!("📅 Created: {}", created);
-    }
-
-    if let Some(rank) = metadata.rank {
-        println!("🔢 Rank: {}", rank);
-    }
-
-    if let Some(alpha) = metadata.alpha {
-        println!("🔢 Alpha: {}", alpha);
-    }
-
-    // Training information
-    if metadata.training_data.is_some() || metadata.epochs.is_some() {
-        println!("\n🎯 Training Information:");
-        println!("─────────────────────────────────────────");
-
-        if let Some(data) = &metadata.training_data {
-            println!("📊 Training Data: {}", data);
-        }
-
-        if let Some(hash) = &metadata.training_data_hash {
-            println!("🔐 Data Hash: {}", &hash[..8]);
-        }
-
-        if let Some(epochs) = metadata.epochs {
-            println!("🔄 Epochs: {}", epochs);
-        }
-
-        if let Some(batch_size) = metadata.batch_size {
-            println!("📦 Batch Size: {}", batch_size);
-        }
-
-        if let Some(lr) = metadata.learning_rate {
-            println!("📈 Learning Rate: {}", lr);
-        }
-
-        if let Some(loss) = metadata.final_loss {
-            println!("📉 Final Loss: {:.4}", loss);
-        }
-
-        if let Some(duration) = &metadata.training_duration {
-            println!("⏱️  Training Duration: {}", duration);
-        }
-
-        if let Some(framework) = &metadata.training_framework {
-            println!("🛠️  Framework: {}", framework);
-        }
-    }
-
-    // Lineage information
-    if metadata.source_model.is_some() || metadata.parent_lora.is_some() {
-        println!("\n🌳 Lineage:");
-        println!("─────────────────────────────────────────");
-
-        if let Some(source) = &metadata.source_model {
-            println!("🎯 Source Model: {}", source);
-        }
-
-        if let Some(parent) = &metadata.parent_lora {
-            println!("👆 Parent LoRA: {}", parent);
-        }
-    }
-
-    println!("\n📁 Location: {}", lora_dir.display());
-
-    if file_exists {
-        if let Some(size) = file_size {
-            let size_mb = size as f64 / 1_048_576.0;
-            println!("💾 File Size: {:.2} MB", size_mb);
-        }
-    } else {
-        println!("⚠️  LoRA file (adapter.safetensors) is missing!");
-    }
+    println!("{}", lora_toml);
 
     Ok(())
 }
 
 // Remove a LoRA from the registry
-pub async fn lora_remove(name: &str, keep_file: bool) -> Result<(), CliError> {
-    let lora_dir = Path::new("loras").join(name);
-    if !lora_dir.exists() {
-        return Err(CliError::InvalidInput(format!("LoRA '{}' not found", name)));
-    }
+pub async fn lora_remove(
+    service: &LoraService,
+    name: &str,
+    keep_file: bool,
+) -> Result<(), CliError> {
+    // Get LoRA by name first
+    let lora = service
+        .get_by_name(name)
+        .await
+        .map_err(|e| CliError::InvalidInput(format!("Failed to get LoRA: {}", e)))?
+        .ok_or_else(|| CliError::InvalidInput(format!("LoRA '{}' not found", name)))?;
 
     if keep_file {
-        println!("📁 Keeping the LoRA files...");
+        println!("📁 Archiving LoRA '{}' (keeping files)...", name);
 
-        // Just remove the metadata to "unregister" it
-        let meta_path = lora_dir.join("meta.toml");
-        if meta_path.exists() {
-            fs::remove_file(&meta_path)
-                .map_err(|e| CliError::InvalidInput(format!("Failed to remove metadata: {}", e)))?;
-        }
+        // Archive the LoRA
+        service
+            .archive(&lora.id)
+            .await
+            .map_err(|e| CliError::InvalidInput(format!("Failed to archive LoRA: {}", e)))?;
 
-        println!(
-            "✅ LoRA '{}' unregistered (files kept in {})",
-            name,
-            lora_dir.display()
-        );
+        println!("✅ LoRA '{}' archived (files kept)", name);
     } else {
         println!("🗑️  Removing LoRA '{}' and all its files...", name);
 
-        // Remove the entire directory
-        fs::remove_dir_all(&lora_dir).map_err(|e| {
-            CliError::InvalidInput(format!("Failed to remove LoRA directory: {}", e))
-        })?;
+        // Delete the LoRA completely
+        service
+            .delete(&lora.id)
+            .await
+            .map_err(|e| CliError::InvalidInput(format!("Failed to delete LoRA: {}", e)))?;
 
         println!("✅ LoRA '{}' removed completely", name);
     }

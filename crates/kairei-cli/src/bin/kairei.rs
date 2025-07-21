@@ -203,48 +203,62 @@ async fn main() -> Result<(), CliError> {
         }) => {
             commands::run_setup(*list, *force, *scan, name.clone(), repo_id.clone()).await?;
         }
-        Some(Commands::Lora { command }) => match command {
-            Some(LoraCommands::Add {
-                source,
-                name,
-                base_model,
-                description,
-            }) => {
-                commands::lora_add(
+        Some(Commands::Lora { command }) => {
+            // Create LoraService
+            use kairei::config::KaireiConfig;
+            use kairei::lora::{InMemoryLoraRepository, LoraService};
+            use kairei::storage::LocalStorage;
+            use std::sync::Arc;
+
+            let config = KaireiConfig::default();
+            let repository = Arc::new(InMemoryLoraRepository::new());
+            let storage = Arc::new(LocalStorage::from_config(&config));
+            let service = LoraService::with_config(repository, storage, config.clone());
+
+            match command {
+                Some(LoraCommands::Add {
                     source,
-                    name.clone(),
-                    base_model.clone(),
-                    description.clone(),
-                )
-                .await?;
+                    name,
+                    base_model,
+                    description,
+                }) => {
+                    commands::lora_add(
+                        &service,
+                        source,
+                        name.clone(),
+                        base_model.clone(),
+                        description.clone(),
+                    )
+                    .await?;
+                }
+                Some(LoraCommands::List) => {
+                    commands::lora_list(&service).await?;
+                }
+                Some(LoraCommands::Show { name }) => {
+                    commands::lora_show(&service, name).await?;
+                }
+                Some(LoraCommands::Remove { name, keep_file }) => {
+                    commands::lora_remove(&service, name, *keep_file).await?;
+                }
+                Some(LoraCommands::Convert {
+                    peft_dir,
+                    output,
+                    prefix,
+                }) => {
+                    commands::convert_peft_to_candle_lora(
+                        peft_dir.clone(),
+                        output.clone(),
+                        Some(prefix.clone()),
+                    )
+                    .await?;
+                }
+                None => {
+                    // Show help when no subcommand is provided
+                    println!("LoRA model management commands\n");
+                    println!("Use --help for more information");
+                }
             }
-            Some(LoraCommands::List) => {
-                commands::lora_list().await?;
-            }
-            Some(LoraCommands::Show { name }) => {
-                commands::lora_show(name).await?;
-            }
-            Some(LoraCommands::Remove { name, keep_file }) => {
-                commands::lora_remove(name, *keep_file).await?;
-            }
-            Some(LoraCommands::Convert {
-                peft_dir,
-                output,
-                prefix,
-            }) => {
-                commands::convert_peft_to_candle_lora(
-                    peft_dir.clone(),
-                    output.clone(),
-                    Some(prefix.clone()),
-                )
-                .await?;
-            }
-            None => {
-                // Show help when no subcommand is provided
-                println!("LoRA model management commands\n");
-                println!("Use --help for more information");
-            }
-        },
+        }
         Some(Commands::Train {
             train_data,
             epochs,
