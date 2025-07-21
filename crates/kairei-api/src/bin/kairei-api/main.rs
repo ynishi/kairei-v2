@@ -1,9 +1,10 @@
 use clap::Parser;
-use kairei::base_model::InMemoryBaseModelRepository;
+use kairei::base_model::{HuggingFaceDownloader, InMemoryBaseModelRepository};
+use kairei::storage::LocalStorage;
 use kairei_api::{ApiConfig, AppState, build_app};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Kairei API Server
@@ -72,9 +73,16 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = config.socket_addr()?;
 
-    // Initialize repository and application state
+    // Initialize repository, storage, downloader and application state
     let base_model_repository = Arc::new(InMemoryBaseModelRepository::new());
-    let state = AppState::new(base_model_repository, config.auth.clone());
+    let storage = Arc::new(LocalStorage::new("models"));
+    let downloader = Arc::new(HuggingFaceDownloader::new(None)); // No API token for now
+    let state = AppState::new(
+        base_model_repository,
+        storage,
+        downloader,
+        config.auth.clone(),
+    );
 
     // Build application
     let app = build_app(state);

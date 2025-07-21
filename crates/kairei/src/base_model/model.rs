@@ -38,10 +38,10 @@ impl fmt::Display for BaseModelId {
 pub struct BaseModel {
     pub id: BaseModelId,
     pub name: String,
-    pub description: String,
-    pub repo_id: String, // Hugging Face repo ID
-    pub filename: String,
-    pub size_mb: u64,
+    pub description: Option<String>,
+    pub repo_id: Option<String>, // Hugging Face repo ID
+    pub filename: Option<String>,
+    pub size_mb: Option<u64>,
     pub metadata: Option<BaseModelMetadata>,
 }
 

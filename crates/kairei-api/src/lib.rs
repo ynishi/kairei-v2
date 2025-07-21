@@ -11,7 +11,8 @@ pub mod routes;
 pub use config::ApiConfig;
 
 use crate::config::AuthConfig;
-use kairei::base_model::{BaseModelRepository, BaseModelService};
+use kairei::base_model::{BaseModelRepository, BaseModelService, ModelDownloader};
+use kairei::storage::Storage;
 use std::sync::Arc;
 
 /// Application state
@@ -22,13 +23,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Create a new AppState with the given repository
+    /// Create a new AppState with the given repository, storage and downloader
     pub fn new(
         base_model_repository: Arc<dyn BaseModelRepository>,
+        storage: Arc<dyn Storage>,
+        downloader: Arc<dyn ModelDownloader>,
         auth_config: AuthConfig,
     ) -> Self {
         Self {
-            base_model_service: BaseModelService::new(base_model_repository),
+            base_model_service: BaseModelService::new(base_model_repository, storage, downloader),
             auth_config,
         }
     }
@@ -43,6 +46,7 @@ impl AppState {
         crate::routes::v1::base_model::create_model,
         crate::routes::v1::base_model::update_model,
         crate::routes::v1::base_model::delete_model,
+        crate::routes::v1::base_model::download_model,
     ),
     components(
         schemas(

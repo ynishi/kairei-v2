@@ -3,76 +3,13 @@
 use crate::error::CliError;
 use chrono::Utc;
 use hf_hub::api::tokio::Api;
-use serde::{Deserialize, Serialize};
+use kairei::base_model::{
+    BaseModelMetadata, BaseModelService, HuggingFaceDownloader, InMemoryBaseModelRepository,
+};
+use kairei::storage::LocalStorage;
 use std::fs;
 use std::path::Path;
-
-/// Model metadata stored as meta.toml in each model directory
-#[derive(Debug, Serialize, Deserialize)]
-struct ModelMetadata {
-    name: String,
-    repo_id: String,
-    model_type: Option<String>,
-    description: Option<String>,
-    downloaded_at: String,
-    // Model specific params
-    parameters: Option<String>,   // e.g., "1.1B", "7B", etc.
-    architecture: Option<String>, // e.g., "llama", "mistral", etc.
-    quantization: Option<String>, // e.g., "f16", "int8", etc.
-}
-
-/// Model information
-struct Model {
-    name: &'static str,
-    filename: &'static str,
-    description: &'static str,
-    repo_id: &'static str,
-    size_mb: u64,
-}
-
-impl Model {
-    const MODELS: &'static [Model] = &[
-        Model {
-            name: "stories15M",
-            filename: "stories15M.bin",
-            description: "15M parameter tiny story model",
-            repo_id: "karpathy/tinyllamas",
-            size_mb: 58,
-        },
-        Model {
-            name: "stories42M",
-            filename: "stories42M.bin",
-            description: "42M parameter story model",
-            repo_id: "karpathy/tinyllamas",
-            size_mb: 161,
-        },
-        Model {
-            name: "stories110M",
-            filename: "stories110M.bin",
-            description: "110M parameter story model",
-            repo_id: "karpathy/tinyllamas",
-            size_mb: 420,
-        },
-        Model {
-            name: "tokenizer",
-            filename: "tokenizer.json",
-            description: "LLaMA tokenizer",
-            repo_id: "hf-internal-testing/llama-tokenizer",
-            size_mb: 2,
-        },
-        Model {
-            name: "tinyllama",
-            filename: "tinyllama/model.safetensors",
-            description: "TinyLlama 1.1B Chat model",
-            repo_id: "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
-            size_mb: 2200,
-        },
-    ];
-
-    fn find(name: &str) -> Option<&'static Model> {
-        Self::MODELS.iter().find(|m| m.name == name)
-    }
-}
+use std::sync::Arc;
 
 pub async fn run_setup(
     list: bool,
@@ -82,18 +19,23 @@ pub async fn run_setup(
     name: Option<String>,
     repo_id: Option<String>,
 ) -> Result<(), CliError> {
+    // Initialize the base model service with local storage and downloader
+    let repository = Arc::new(InMemoryBaseModelRepository::new());
+    let storage = Arc::new(LocalStorage::new("models"));
+    let downloader = Arc::new(HuggingFaceDownloader::new(None)); // No API token for now
+    let service = BaseModelService::new(repository, storage, downloader);
     if list {
-        list_models();
+        list_models(&service).await?;
         return Ok(());
     }
 
     if models {
-        list_downloaded_models()?;
+        list_downloaded_models(&service).await?;
         return Ok(());
     }
 
     // Create necessary directories
-    let models_dir = Path::new("models");
+    let _models_dir = Path::new("models");
     let directories = vec!["models", "loras", "lora_datasets", "base_models"];
     for dir in &directories {
         let path = Path::new(dir);
@@ -106,94 +48,91 @@ pub async fn run_setup(
     }
 
     // Check if this is a custom model download
-    if let (Some(custom_name), Some(custom_repo)) = (name, repo_id) {
+    if let (Some(custom_name), Some(custom_repo)) = (name.clone(), repo_id.clone()) {
         // Download custom HuggingFace model
         println!(
             "\n🤖 Downloading custom model: {} from {}",
             custom_name, custom_repo
         );
 
-        let model_dir = Path::new("models").join(&custom_name);
-        if model_dir.exists() && !force {
-            println!(
-                "✅ {} already exists (use --force to re-download)",
-                custom_name
-            );
-            return Ok(());
-        }
-
-        download_custom_model(&custom_name, &custom_repo, &model_dir).await?;
+        let model = service
+            .download_custom_model(custom_name.clone(), custom_repo.clone(), force)
+            .await
+            .map_err(|e| CliError::InvalidInput(e.to_string()))?;
 
         println!("✅ Downloaded {} successfully!", custom_name);
         println!("\n🎉 Setup complete! You can now use your custom model.");
         return Ok(());
     }
 
-    // Determine which models to download
-    let models_to_download = if let Some(model_name) = model {
-        // Download specific model
-        if let Some(model) = Model::find(&model_name) {
-            vec![model]
-        } else {
-            return Err(CliError::InvalidInput(format!(
-                "Unknown model: {}",
-                model_name
-            )));
-        }
-    } else {
-        // Default: download tokenizer and smallest model
-        vec![
-            Model::find("tokenizer").unwrap(),
-            Model::find("stories15M").unwrap(),
-        ]
-    };
-
-    // Download models
-    for model in models_to_download {
-        let target_path = models_dir.join(model.filename);
-
-        if target_path.exists() && !force {
-            println!(
-                "✅ {} already exists (use --force to re-download)",
-                model.filename
-            );
-            continue;
-        }
-
-        println!(
-            "\n🌐 Downloading {} ({}, ~{}MB)...",
-            model.name, model.description, model.size_mb
-        );
-
-        download_model(model, &target_path).await?;
-
-        println!("✅ Downloaded {} successfully!", model.filename);
+    // If no specific name/repo provided and no specific model requested, show help
+    if name.is_none() && repo_id.is_none() && model.is_none() {
+        println!("🎯 No model specified. Use one of the following:");
+        println!("  kairei setup --name <name> --repo-id <repo>  # Download custom model");
+        println!("  kairei setup --list                           # List downloaded models");
+        println!("  kairei setup --models                         # Show downloaded models");
+        return Ok(());
     }
 
-    println!("\n🎉 Setup complete! You can now run:");
-    println!("   kairei chat --candle -m \"Hello, world!\"");
+    // Download specific model if model name is provided
+    if let Some(_model_name) = model {
+        return Err(CliError::InvalidInput(
+            "Model download by name is not supported. Please use --name and --repo-id".to_string(),
+        ));
+    }
 
     Ok(())
 }
 
-fn list_models() {
-    println!("📦 Available models:");
-    println!("==================");
+async fn list_models(service: &BaseModelService) -> Result<(), CliError> {
+    println!("📦 Downloaded models:");
+    println!("===================");
     println!();
 
-    for model in Model::MODELS {
-        println!("  {} - {}", model.name, model.description);
-        println!("       File: {} (~{}MB)", model.filename, model.size_mb);
+    let models = service
+        .list_models()
+        .await
+        .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+    if models.is_empty() {
+        println!("  No models registered yet.");
         println!();
+        println!("To download a model:");
+        println!("  kairei setup --name <name> --repo-id <huggingface-repo>");
+    } else {
+        for model in models {
+            println!(
+                "  {} - {}",
+                model.name,
+                model.description.as_deref().unwrap_or("No description")
+            );
+            if let Some(repo_id) = &model.repo_id {
+                println!("       Repo: {}", repo_id);
+            }
+            if let Some(filename) = &model.filename {
+                println!(
+                    "       File: {} (~{}MB)",
+                    filename,
+                    model.size_mb.unwrap_or(0)
+                );
+            }
+            if service
+                .is_model_downloaded(&model.id)
+                .await
+                .map_err(|e| CliError::InvalidInput(e.to_string()))?
+            {
+                println!("       Status: ✅ Downloaded");
+            } else {
+                println!("       Status: ❌ Not downloaded");
+            }
+            println!();
+        }
     }
 
-    println!("Usage examples:");
-    println!("  kairei setup                    # Download default models");
-    println!("  kairei setup --model stories42M # Download specific model");
-    println!("  kairei setup --list            # List available models");
+    Ok(())
 }
 
-fn list_downloaded_models() -> Result<(), CliError> {
+async fn list_downloaded_models(service: &BaseModelService) -> Result<(), CliError> {
     let models_dir = Path::new("models");
 
     if !models_dir.exists() {
@@ -205,6 +144,38 @@ fn list_downloaded_models() -> Result<(), CliError> {
     println!("===================");
     println!();
 
+    let downloaded_models = service
+        .list_downloaded_models()
+        .await
+        .map_err(|e| CliError::InvalidInput(e.to_string()))?;
+
+    if downloaded_models.is_empty() {
+        println!("  No models found. Run 'kairei setup' to download models.");
+    } else {
+        for model in downloaded_models {
+            println!(
+                "  {} - {}",
+                model.name,
+                model.description.as_deref().unwrap_or("No description")
+            );
+            if let Some(repo_id) = &model.repo_id {
+                println!("       Repo: {}", repo_id);
+            }
+            if let Some(metadata) = &model.metadata {
+                if let Some(params) = &metadata.parameters {
+                    println!("       Size: {}", params);
+                }
+                if let Some(arch) = &metadata.architecture {
+                    println!("       Architecture: {}", arch);
+                }
+                if let Some(downloaded_at) = &metadata.downloaded_at {
+                    println!("       Downloaded: {}", downloaded_at);
+                }
+            }
+        }
+    }
+
+    // Also check filesystem for legacy models
     let mut found_models = false;
 
     // Check for llama2c style models (*.bin files)
@@ -229,7 +200,7 @@ fn list_downloaded_models() -> Result<(), CliError> {
                         // Try to read metadata
                         match fs::read_to_string(&meta_path) {
                             Ok(content) => {
-                                match toml::from_str::<ModelMetadata>(&content) {
+                                match toml::from_str::<BaseModelMetadata>(&content) {
                                     Ok(metadata) => {
                                         println!(
                                             "  {} - {}",
@@ -246,7 +217,9 @@ fn list_downloaded_models() -> Result<(), CliError> {
                                         if let Some(arch) = &metadata.architecture {
                                             println!("       Architecture: {}", arch);
                                         }
-                                        println!("       Downloaded: {}", metadata.downloaded_at);
+                                        if let Some(downloaded_at) = &metadata.downloaded_at {
+                                            println!("       Downloaded: {}", downloaded_at);
+                                        }
                                     }
                                     Err(_) => {
                                         // Fallback to directory name if metadata is invalid
@@ -307,7 +280,11 @@ fn list_downloaded_models() -> Result<(), CliError> {
     Ok(())
 }
 
-async fn download_model(model: &Model, target_path: &Path) -> Result<(), CliError> {
+async fn download_model_from_hf(
+    repo_id: &str,
+    filename: &str,
+    target_path: &Path,
+) -> Result<(), CliError> {
     // Create parent directory if needed
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent)
@@ -319,12 +296,12 @@ async fn download_model(model: &Model, target_path: &Path) -> Result<(), CliErro
         CliError::InvalidInput(format!("Failed to create HuggingFace API client: {}", e))
     })?;
 
-    let repo = api.model(model.repo_id.to_string());
+    let repo = api.model(repo_id.to_string());
 
     println!("Connecting to HuggingFace Hub...");
 
     let downloaded_path = repo
-        .download(model.filename)
+        .download(filename)
         .await
         .map_err(|e| CliError::InvalidInput(format!("Download failed: {}", e)))?;
 
@@ -415,7 +392,6 @@ async fn download_custom_model(
     println!("✅ Downloaded {} files successfully!", downloaded_files);
 
     // Try to read config.json to get model information
-    let mut model_type = None;
     let mut architecture = None;
     let mut parameters = None;
 
@@ -423,11 +399,6 @@ async fn download_custom_model(
     if config_path.exists() {
         if let Ok(config_content) = fs::read_to_string(&config_path) {
             if let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_content) {
-                // Extract model type
-                if let Some(model_type_value) = config.get("model_type") {
-                    model_type = model_type_value.as_str().map(|s| s.to_string());
-                }
-
                 // Extract architecture info
                 if let Some(arch_value) = config.get("architectures") {
                     if let Some(arch_array) = arch_value.as_array() {
@@ -455,12 +426,11 @@ async fn download_custom_model(
     }
 
     // Create metadata file
-    let metadata = ModelMetadata {
+    let metadata = BaseModelMetadata {
         name: _name.to_string(),
         repo_id: repo_id.to_string(),
-        model_type,
         description: Some(format!("Downloaded from HuggingFace: {}", repo_id)),
-        downloaded_at: Utc::now().to_rfc3339(),
+        downloaded_at: Some(Utc::now().to_rfc3339()),
         parameters,
         architecture,
         quantization: None,

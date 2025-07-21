@@ -69,10 +69,10 @@ impl From<BaseModelMetadataDto> for BaseModelMetadata {
 pub struct ModelDto {
     pub id: String,
     pub name: String,
-    pub description: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub size_mb: u64,
+    pub description: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub size_mb: Option<u64>,
     pub status: ModelStatus,
     pub metadata: Option<BaseModelMetadataDto>,
 }
@@ -96,10 +96,10 @@ impl From<BaseModel> for ModelDto {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreateModelRequest {
     pub name: String,
-    pub description: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub size_mb: u64,
+    pub description: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub size_mb: Option<u64>,
     pub metadata: Option<BaseModelMetadataDto>,
 }
 
@@ -280,6 +280,85 @@ pub async fn delete_model(
     }
 }
 
+/// Download a model from HuggingFace
+#[utoipa::path(
+    post,
+    path = "/api/v1/models/{id}/download",
+    params(
+        ("id" = String, Path, description = "Model ID")
+    ),
+    responses(
+        (status = 200, description = "Model downloaded successfully", body = ModelDto),
+        (status = 404, description = "Model not found"),
+        (status = 409, description = "Model already downloaded")
+    ),
+    tag = "models"
+)]
+pub async fn download_model(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let model_id = BaseModelId::from_string(id);
+
+    // Check if model exists first
+    let model = match state.base_model_service.get_model(&model_id).await {
+        Ok(m) => m,
+        Err(kairei::base_model::BaseModelError::NotFound(_)) => {
+            return Err((StatusCode::NOT_FOUND, "Model not found"));
+        }
+        Err(_) => {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to get model"));
+        }
+    };
+
+    // Check if already downloaded
+    match state
+        .base_model_service
+        .is_model_downloaded(&model_id)
+        .await
+    {
+        Ok(true) => {
+            return Ok(Json(ModelDto::from(model)));
+        }
+        Ok(false) => {
+            // Proceed with download
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to check download status",
+            ));
+        }
+    }
+
+    // Download the model
+    match state
+        .base_model_service
+        .download_model(&model_id, false)
+        .await
+    {
+        Ok(()) => {
+            // Get updated model
+            match state.base_model_service.get_model(&model_id).await {
+                Ok(updated_model) => Ok(Json(ModelDto::from(updated_model))),
+                Err(_) => Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to get updated model",
+                )),
+            }
+        }
+        Err(e) => match e {
+            kairei::base_model::BaseModelError::DownloadError(_msg) => {
+                Err((StatusCode::BAD_GATEWAY, "Download failed"))
+            }
+            _ => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to download model",
+            )),
+        },
+    }
+}
+
 /// Routes for base model endpoints
 pub fn routes() -> axum::Router<AppState> {
     use axum::routing::get;
@@ -290,4 +369,5 @@ pub fn routes() -> axum::Router<AppState> {
             "/{id}",
             get(get_model).put(update_model).delete(delete_model),
         )
+        .route("/{id}/download", axum::routing::post(download_model))
 }

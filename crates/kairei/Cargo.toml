@@ -17,6 +17,8 @@ thiserror = "2.0.12"
 strum = "0.27.2"
 uuid = "1.17.0"
 strum_macros = "0.27.2"
+chrono = { version = "0.4", features = ["serde"] }
+hf-hub = { version = "0.4", features = ["tokio"] }
 
 [features]
 default = []

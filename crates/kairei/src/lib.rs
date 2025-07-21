@@ -6,6 +6,7 @@
 pub mod app;
 pub mod base_model;
 pub mod error;
+pub mod storage;
 
 // Re-export core types
 pub use kairei_core::{
