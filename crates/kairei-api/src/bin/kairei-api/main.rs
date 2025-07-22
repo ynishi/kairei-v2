@@ -1,9 +1,13 @@
 use clap::Parser;
-use kairei::base_model::{HuggingFaceDownloader, InMemoryBaseModelRepository};
-use kairei::lora::InMemoryLoraRepository;
+use kairei::base_model::{
+    HuggingFaceDownloader, InMemoryBaseModelRepository, PostgresBaseModelRepository,
+};
+use kairei::lora::{InMemoryLoraRepository, PostgresLoraRepository};
 use kairei::storage::LocalStorage;
 use kairei::training_data::InMemoryTrainingDataRepository;
 use kairei_api::{ApiConfig, AppState, build_app};
+use sqlx::postgres::PgPoolOptions;
+use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -36,6 +40,9 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Load .env file
+    dotenv::dotenv().ok();
+
     // Parse CLI arguments
     let cli = Cli::parse();
 
@@ -75,12 +82,36 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = config.socket_addr()?;
 
-    // Initialize repository, storage, downloader and application state
-    let base_model_repository = Arc::new(InMemoryBaseModelRepository::new());
-    let lora_repository = Arc::new(InMemoryLoraRepository::new());
+    // Initialize database connection if DATABASE_URL is set
+    let (base_model_repository, lora_repository): (
+        Arc<dyn kairei::base_model::BaseModelRepository>,
+        Arc<dyn kairei::lora::LoraRepository>,
+    ) = if let Ok(database_url) = env::var("DATABASE_URL") {
+        info!("Connecting to PostgreSQL database...");
+        let pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(&database_url)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
+        info!("Database connection established");
+
+        (
+            Arc::new(PostgresBaseModelRepository::new(pool.clone())),
+            Arc::new(PostgresLoraRepository::new(pool)),
+        )
+    } else {
+        warn!("No DATABASE_URL found, using in-memory repositories");
+        (
+            Arc::new(InMemoryBaseModelRepository::new()),
+            Arc::new(InMemoryLoraRepository::new()),
+        )
+    };
+
     let training_data_repository = Arc::new(InMemoryTrainingDataRepository::new());
     let storage = Arc::new(LocalStorage::new("."));
-    let downloader = Arc::new(HuggingFaceDownloader::new(None)); // No API token for now
+    let downloader = Arc::new(HuggingFaceDownloader::new(
+        env::var("HUGGINGFACE_TOKEN").ok(),
+    ));
     let state = AppState::new(
         base_model_repository,
         lora_repository,

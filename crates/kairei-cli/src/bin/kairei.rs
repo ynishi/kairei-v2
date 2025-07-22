@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use kairei_cli::{ModelType, commands, error::CliError};
+use std::env;
 
 #[derive(Parser)]
 #[command(name = "kairei")]
@@ -163,6 +164,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
+    // Load .env file
+    dotenv::dotenv().ok();
+
     let cli = Cli::parse();
 
     match &cli.command {
@@ -206,12 +210,30 @@ async fn main() -> Result<(), CliError> {
         Some(Commands::Lora { command }) => {
             // Create LoraService
             use kairei::config::KaireiConfig;
-            use kairei::lora::{InMemoryLoraRepository, LoraService};
+            use kairei::lora::{InMemoryLoraRepository, LoraService, PostgresLoraRepository};
             use kairei::storage::LocalStorage;
+            use sqlx::postgres::PgPoolOptions;
             use std::sync::Arc;
 
             let config = KaireiConfig::default();
-            let repository = Arc::new(InMemoryLoraRepository::new());
+
+            // Try to use PostgreSQL if DATABASE_URL is set, otherwise fall back to in-memory
+            let repository: Arc<dyn kairei::lora::LoraRepository> =
+                if let Ok(database_url) = env::var("DATABASE_URL") {
+                    println!("📊 Connecting to database...");
+                    let pool = PgPoolOptions::new()
+                        .max_connections(5)
+                        .connect(&database_url)
+                        .await
+                        .map_err(|e| {
+                            CliError::InvalidInput(format!("Failed to connect to database: {}", e))
+                        })?;
+                    Arc::new(PostgresLoraRepository::new(pool))
+                } else {
+                    println!("⚠️  No DATABASE_URL found, using in-memory repository");
+                    Arc::new(InMemoryLoraRepository::new())
+                };
+
             let storage = Arc::new(LocalStorage::from_config(&config));
             let service = LoraService::with_config(repository, storage, config.clone());
 
