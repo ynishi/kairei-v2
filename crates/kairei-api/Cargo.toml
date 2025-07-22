@@ -33,7 +33,7 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 
 # エラーハンドリング
 anyhow = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
