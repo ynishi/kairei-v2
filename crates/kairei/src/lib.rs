@@ -5,10 +5,12 @@
 
 pub mod app;
 pub mod base_model;
+pub mod chat;
 pub mod config;
 pub mod error;
 pub mod lora;
 pub mod storage;
+pub mod trainer;
 pub mod training_data;
 
 // Re-export core types

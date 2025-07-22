@@ -90,8 +90,7 @@ impl Default for DataFormat {
 }
 
 /// Training data metadata
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrainingDataMetadata {
     /// Data source (e.g., "user_upload", "generated", "scraped")
     pub source: Option<String>,
@@ -104,7 +103,6 @@ pub struct TrainingDataMetadata {
     /// Custom properties
     pub properties: Option<serde_json::Value>,
 }
-
 
 /// Training data entity
 #[derive(Debug, Clone, Serialize, Deserialize)]

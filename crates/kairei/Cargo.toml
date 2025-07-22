@@ -29,3 +29,6 @@ sha256 = "1.5"
 [features]
 default = []
 candle = ["dep:kairei-candle"]
+
+[dev-dependencies]
+tempfile = "3.8"

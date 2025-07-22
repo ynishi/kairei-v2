@@ -1,10 +1,9 @@
 //! Train command implementation
 
 use crate::error::CliError;
-use chrono::Local;
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+use kairei::storage::LocalStorage;
+use kairei::trainer::{TrainParams, TrainerService, TrainingStatus};
+use std::sync::Arc;
 
 /// Run the training script with specified parameters
 pub async fn run_train(
@@ -20,148 +19,71 @@ pub async fn run_train(
 ) -> Result<(), CliError> {
     println!("🎯 Starting LoRA training...\n");
 
-    // Generate output directory with timestamp if not specified
-    let output_dir = output_dir.unwrap_or_else(|| {
-        let timestamp = Local::now().format("%Y%m%d_%H%M%S");
-        let model_name = model.split('/').last().unwrap_or(&model).replace('.', "_");
-        format!("training/lora_output/{}_{}", model_name, timestamp)
-    });
+    // Create storage and trainer service
+    let storage = Arc::new(LocalStorage::new("."));
+    let trainer = TrainerService::new(storage);
 
-    // Create output directory if it doesn't exist
-    fs::create_dir_all(&output_dir)
-        .map_err(|e| CliError::InvalidInput(format!("Failed to create output directory: {}", e)))?;
-
-    // Check if training script exists
-    let script_path = "training/scripts/train_lora.py";
-    if !Path::new(script_path).exists() {
-        return Err(CliError::InvalidInput(format!(
-            "Training script not found at {}. Make sure you're in the project root directory.",
-            script_path
-        )));
-    }
-
-    // Check if poetry is available
-    let poetry_check = Command::new("poetry").arg("--version").output();
-
-    if poetry_check.is_err() {
-        return Err(CliError::InvalidInput(
-            "Poetry not found. Please install Poetry to run training.".to_string(),
-        ));
-    }
-
-    // Resolve model name (check if it's a registered model)
-    let resolved_model = if !model.contains('/') {
-        // Might be a registered model name, check if it exists
-        let model_path = Path::new("models").join(&model);
-        if model_path.exists() {
-            // Check for meta.toml to get the HuggingFace ID
-            let meta_path = model_path.join("meta.toml");
-            if meta_path.exists() {
-                // Try to extract the repo_id from meta.toml
-                if let Ok(meta_content) = std::fs::read_to_string(&meta_path) {
-                    if let Ok(metadata) = toml::from_str::<toml::Value>(&meta_content) {
-                        if let Some(repo_id) = metadata.get("repo_id").and_then(|v| v.as_str()) {
-                            println!("📦 Resolved '{}' to HuggingFace model: {}", model, repo_id);
-                            repo_id.to_string()
-                        } else {
-                            // Fallback: use the original model string
-                            model.clone()
-                        }
-                    } else {
-                        model.clone()
-                    }
-                } else {
-                    model.clone()
-                }
-            } else {
-                model.clone()
-            }
-        } else {
-            // Not a registered model, assume it's a HuggingFace ID
-            model.clone()
-        }
-    } else {
-        // Already looks like a HuggingFace ID
-        model.clone()
+    // Create training parameters
+    let params = TrainParams {
+        train_data,
+        epochs,
+        lora_r,
+        lora_alpha,
+        output_dir,
+        model,
+        batch_size,
+        learning_rate,
+        test,
     };
 
-    // Adjust train_data path if it starts with "training/"
-    let adjusted_train_data = if train_data.starts_with("training/") {
-        train_data.strip_prefix("training/").unwrap().to_string()
-    } else {
-        train_data.clone()
-    };
-
-    // Adjust output_dir path if it starts with "training/"
-    let adjusted_output_dir = if output_dir.starts_with("training/") {
-        output_dir.strip_prefix("training/").unwrap().to_string()
-    } else {
-        output_dir.clone()
-    };
-
-    // Build the command
-    let mut cmd = Command::new("poetry");
-    cmd.current_dir("training")
-        .arg("run")
-        .arg("python")
-        .arg("scripts/train_lora.py")
-        .arg("--train-data")
-        .arg(&adjusted_train_data)
-        .arg("--epochs")
-        .arg(epochs.to_string())
-        .arg("--lora-r")
-        .arg(lora_r.to_string())
-        .arg("--lora-alpha")
-        .arg(lora_alpha.to_string())
-        .arg("--output-dir")
-        .arg(&adjusted_output_dir)
-        .arg("--model")
-        .arg(&resolved_model)
-        .arg("--batch-size")
-        .arg(batch_size.to_string())
-        .arg("--learning-rate")
-        .arg(learning_rate.to_string());
-
-    if test {
-        cmd.arg("--test");
-    }
-
+    // Print training configuration
     println!("📝 Training configuration:");
-    println!("  Model: {}", resolved_model);
-    println!("  Training data: {}", train_data);
-    println!("  Epochs: {}", epochs);
-    println!("  LoRA rank: {}", lora_r);
-    println!("  LoRA alpha: {}", lora_alpha);
-    println!("  Batch size: {}", batch_size);
-    println!("  Learning rate: {}", learning_rate);
-    println!("  Output: {}", output_dir);
-    println!("  Test after training: {}\n", test);
+    println!("  Model: {}", params.model);
+    println!("  Training data: {}", params.train_data);
+    println!("  Epochs: {}", params.epochs);
+    println!("  LoRA rank: {}", params.lora_r);
+    println!("  LoRA alpha: {}", params.lora_alpha);
+    println!("  Batch size: {}", params.batch_size);
+    println!("  Learning rate: {}", params.learning_rate);
+    println!(
+        "  Output: {}",
+        params
+            .output_dir
+            .as_ref()
+            .unwrap_or(&"auto-generated".to_string())
+    );
+    println!("  Test after training: {}\n", params.test);
 
     // Run the training
     println!("⚡ Running training script...\n");
 
-    let status = cmd
-        .status()
-        .map_err(|e| CliError::InvalidInput(format!("Failed to run training: {}", e)))?;
+    match trainer.train_lora(params).await {
+        Ok(result) => {
+            if result.status == TrainingStatus::Completed {
+                println!("\n✅ Training completed successfully!");
+                println!("📁 Model saved to: {}", result.output_dir);
 
-    if !status.success() {
-        return Err(CliError::InvalidInput("Training failed".to_string()));
+                // If the training was successful, suggest converting to candle format
+                println!("\n💡 To use the trained model with Kairei:");
+                println!("   1. Convert to candle format:");
+                println!(
+                    "      kairei lora convert {} --output my_lora.safetensors",
+                    result.output_dir
+                );
+                println!("   2. Add to registry:");
+                println!("      kairei lora add my_lora.safetensors --name my_culture");
+                println!("   3. Use in chat:");
+                println!("      kairei chat --lora my_culture");
+
+                Ok(())
+            } else {
+                let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+                Err(CliError::InvalidInput(format!(
+                    "Training failed: {}",
+                    error_msg
+                )))
+            }
+        }
+        Err(e) => Err(CliError::InvalidInput(format!("Training error: {}", e))),
     }
-
-    println!("\n✅ Training completed successfully!");
-    println!("📁 Model saved to: {}", output_dir);
-
-    // If the training was successful, suggest converting to candle format
-    println!("\n💡 To use the trained model with Kairei:");
-    println!("   1. Convert to candle format:");
-    println!(
-        "      kairei lora convert {} --output my_lora.safetensors",
-        output_dir
-    );
-    println!("   2. Add to registry:");
-    println!("      kairei lora add my_lora.safetensors --name my_culture");
-    println!("   3. Use in chat:");
-    println!("      kairei chat --lora my_culture");
-
-    Ok(())
 }

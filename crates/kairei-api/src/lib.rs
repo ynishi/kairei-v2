@@ -12,6 +12,7 @@ pub use config::ApiConfig;
 
 use crate::config::AuthConfig;
 use kairei::base_model::{BaseModelRepository, BaseModelService, ModelDownloader};
+use kairei::chat::ChatService;
 use kairei::lora::{LoraRepository, LoraService};
 use kairei::storage::Storage;
 use kairei::training_data::{TrainingDataRepository, TrainingDataService};
@@ -23,7 +24,9 @@ pub struct AppState {
     pub base_model_service: BaseModelService,
     pub lora_service: LoraService,
     pub training_data_service: TrainingDataService,
+    pub chat_service: ChatService,
     pub auth_config: AuthConfig,
+    pub storage: Arc<dyn Storage>,
 }
 
 impl AppState {
@@ -38,6 +41,7 @@ impl AppState {
     ) -> Self {
         let storage_clone = storage.clone();
         let storage_clone2 = storage.clone();
+        let storage_clone3 = storage.clone();
         Self {
             base_model_service: BaseModelService::new(base_model_repository, storage, downloader),
             lora_service: LoraService::new(lora_repository, storage_clone),
@@ -45,7 +49,9 @@ impl AppState {
                 training_data_repository,
                 storage_clone2,
             ),
+            chat_service: ChatService::new(),
             auth_config,
+            storage: storage_clone3,
         }
     }
 }
@@ -60,6 +66,7 @@ impl AppState {
         crate::routes::v1::base_model::update_model,
         crate::routes::v1::base_model::delete_model,
         crate::routes::v1::base_model::download_model,
+        crate::routes::v1::trainer::train_lora,
     ),
     components(
         schemas(
@@ -70,11 +77,14 @@ impl AppState {
             crate::routes::v1::base_model::CreateModelRequest,
             crate::routes::v1::base_model::UpdateModelRequest,
             crate::routes::v1::base_model::BaseModelMetadataDto,
+            crate::routes::v1::trainer::TrainRequest,
+            crate::routes::v1::trainer::TrainResponse,
         )
     ),
     tags(
         (name = "health", description = "Health check endpoints"),
-        (name = "models", description = "Model management endpoints")
+        (name = "models", description = "Model management endpoints"),
+        (name = "training", description = "Model training endpoints")
     )
 )]
 pub struct ApiDoc;

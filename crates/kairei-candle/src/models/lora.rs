@@ -537,7 +537,7 @@ pub fn convert_peft_to_candle_lora(
     }
 
     let device = Device::Cpu;
-    
+
     // Use the new typed conversion function with dummy embeddings enabled
     convert_peft_dir_to_candle_lora_typed(peft_dir, output_path, &device, true)
 }
