@@ -326,12 +326,75 @@ pub async fn get_lora_by_name(
     }
 }
 
+/// Upload file to LoRA
+#[utoipa::path(
+    post,
+    path = "/api/v1/loras/{id}/upload",
+    params(
+        ("id" = String, Path, description = "LoRA ID")
+    ),
+    request_body(content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "File uploaded", body = LoraDto),
+        (status = 404, description = "LoRA not found"),
+        (status = 413, description = "File too large")
+    ),
+    tag = "loras"
+)]
+pub async fn upload_lora_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    let lora_id = LoraId::from_string(id);
+
+    // Get the file from multipart
+    let mut file_name = String::new();
+    let mut file_content = Vec::new();
+
+    while let Some(field) = multipart.next_field().await.unwrap_or(None) {
+        let name = field.name().unwrap_or("").to_string();
+
+        if name == "file" {
+            file_name = field
+                .file_name()
+                .unwrap_or("adapter.safetensors")
+                .to_string();
+            file_content = match field.bytes().await {
+                Ok(bytes) => bytes.to_vec(),
+                Err(_) => {
+                    return Err((StatusCode::BAD_REQUEST, "Failed to read file"));
+                }
+            };
+            break;
+        }
+    }
+
+    if file_content.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "No file uploaded"));
+    }
+
+    // Upload the file
+    match state
+        .lora_service
+        .upload_file(&lora_id, &file_name, &file_content)
+        .await
+    {
+        Ok(lora) => Ok(Json(LoraDto::from(lora))),
+        Err(e) => match e {
+            kairei::lora::LoraError::NotFound(_) => Err((StatusCode::NOT_FOUND, "LoRA not found")),
+            _ => Err((StatusCode::INTERNAL_SERVER_ERROR, "Failed to upload file")),
+        },
+    }
+}
+
 /// Routes for LoRA endpoints
 pub fn routes() -> axum::Router<AppState> {
-    use axum::routing::get;
+    use axum::routing::{get, post};
 
     axum::Router::new()
         .route("/", get(list_loras).post(create_lora))
         .route("/by-name/{name}", get(get_lora_by_name))
         .route("/{id}", get(get_lora).put(update_lora).delete(delete_lora))
+        .route("/{id}/upload", post(upload_lora_file))
 }

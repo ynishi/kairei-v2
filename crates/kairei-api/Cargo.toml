@@ -14,7 +14,7 @@ path = "src/bin/kairei-api/main.rs"
 [dependencies]
 # 基本
 kairei = { path = "../kairei" }
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }

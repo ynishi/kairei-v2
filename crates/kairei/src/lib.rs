@@ -9,6 +9,7 @@ pub mod config;
 pub mod error;
 pub mod lora;
 pub mod storage;
+pub mod training_data;
 
 // Re-export core types
 pub use kairei_core::{

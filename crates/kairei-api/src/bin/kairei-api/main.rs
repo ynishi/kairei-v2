@@ -2,6 +2,7 @@ use clap::Parser;
 use kairei::base_model::{HuggingFaceDownloader, InMemoryBaseModelRepository};
 use kairei::lora::InMemoryLoraRepository;
 use kairei::storage::LocalStorage;
+use kairei::training_data::InMemoryTrainingDataRepository;
 use kairei_api::{ApiConfig, AppState, build_app};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,11 +78,13 @@ async fn main() -> anyhow::Result<()> {
     // Initialize repository, storage, downloader and application state
     let base_model_repository = Arc::new(InMemoryBaseModelRepository::new());
     let lora_repository = Arc::new(InMemoryLoraRepository::new());
-    let storage = Arc::new(LocalStorage::new("models"));
+    let training_data_repository = Arc::new(InMemoryTrainingDataRepository::new());
+    let storage = Arc::new(LocalStorage::new("."));
     let downloader = Arc::new(HuggingFaceDownloader::new(None)); // No API token for now
     let state = AppState::new(
         base_model_repository,
         lora_repository,
+        training_data_repository,
         storage,
         downloader,
         config.auth.clone(),

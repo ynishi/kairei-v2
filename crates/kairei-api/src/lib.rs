@@ -14,6 +14,7 @@ use crate::config::AuthConfig;
 use kairei::base_model::{BaseModelRepository, BaseModelService, ModelDownloader};
 use kairei::lora::{LoraRepository, LoraService};
 use kairei::storage::Storage;
+use kairei::training_data::{TrainingDataRepository, TrainingDataService};
 use std::sync::Arc;
 
 /// Application state
@@ -21,6 +22,7 @@ use std::sync::Arc;
 pub struct AppState {
     pub base_model_service: BaseModelService,
     pub lora_service: LoraService,
+    pub training_data_service: TrainingDataService,
     pub auth_config: AuthConfig,
 }
 
@@ -29,14 +31,20 @@ impl AppState {
     pub fn new(
         base_model_repository: Arc<dyn BaseModelRepository>,
         lora_repository: Arc<dyn LoraRepository>,
+        training_data_repository: Arc<dyn TrainingDataRepository>,
         storage: Arc<dyn Storage>,
         downloader: Arc<dyn ModelDownloader>,
         auth_config: AuthConfig,
     ) -> Self {
         let storage_clone = storage.clone();
+        let storage_clone2 = storage.clone();
         Self {
             base_model_service: BaseModelService::new(base_model_repository, storage, downloader),
             lora_service: LoraService::new(lora_repository, storage_clone),
+            training_data_service: TrainingDataService::new(
+                training_data_repository,
+                storage_clone2,
+            ),
             auth_config,
         }
     }

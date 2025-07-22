@@ -103,6 +103,14 @@ impl Storage for LocalStorage {
         Ok(())
     }
 
+    async fn delete_dir(&self, path: &str) -> StorageResult<()> {
+        let full_path = self.full_path(path);
+        if full_path.exists() && full_path.is_dir() {
+            fs::remove_dir_all(&full_path).await?;
+        }
+        Ok(())
+    }
+
     async fn copy(&self, source: &str, destination: &str) -> StorageResult<()> {
         let source_path = self.full_path(source);
         let dest_path = self.full_path(destination);

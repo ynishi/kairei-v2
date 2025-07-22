@@ -32,6 +32,9 @@ pub trait Storage: Send + Sync {
     /// Create directory
     async fn create_dir(&self, path: &str) -> StorageResult<()>;
 
+    /// Delete directory and all its contents
+    async fn delete_dir(&self, path: &str) -> StorageResult<()>;
+
     /// Copy file from source to destination
     async fn copy(&self, source: &str, destination: &str) -> StorageResult<()>;
 

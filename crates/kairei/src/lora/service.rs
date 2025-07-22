@@ -1,4 +1,4 @@
-use super::{Lora, LoraError, LoraId, LoraMetadata, LoraRepository, Result};
+use super::{Lora, LoraError, LoraId, LoraMetadata, LoraRepository, LoraStatus, Result};
 use crate::base_model::BaseModelId;
 use crate::config::KaireiConfig;
 use crate::storage::Storage;
@@ -277,8 +277,9 @@ impl LoraService {
     ) -> Result<()> {
         use kairei_candle::convert_peft_to_candle_lora as candle_convert;
 
-        candle_convert(peft_dir, output_path, prefix)
-            .map_err(|e| LoraError::ConversionError(format!("PEFT to candle-lora conversion failed: {}", e)))?;
+        candle_convert(peft_dir, output_path, prefix).map_err(|e| {
+            LoraError::ConversionError(format!("PEFT to candle-lora conversion failed: {}", e))
+        })?;
 
         Ok(())
     }
@@ -292,7 +293,52 @@ impl LoraService {
         _prefix: Option<String>,
     ) -> Result<()> {
         Err(LoraError::ConversionError(
-            "Candle feature is not enabled. Enable the 'candle' feature to use this functionality.".to_string()
+            "Candle feature is not enabled. Enable the 'candle' feature to use this functionality."
+                .to_string(),
         ))
+    }
+
+    /// Upload a LoRA file
+    pub async fn upload_file(&self, id: &LoraId, file_name: &str, content: &[u8]) -> Result<Lora> {
+        // Get existing LoRA
+        let mut lora = self
+            .repository
+            .get(id)
+            .await?
+            .ok_or_else(|| LoraError::NotFound(id.to_string()))?;
+
+        // Check file size limit (e.g., 500MB for LoRA files)
+        const MAX_FILE_SIZE: u64 = 500 * 1024 * 1024; // 500MB
+        let file_size = content.len() as u64;
+        if file_size > MAX_FILE_SIZE {
+            return Err(LoraError::Other(format!(
+                "File too large: {} bytes (max: {} bytes)",
+                file_size, MAX_FILE_SIZE
+            )));
+        }
+
+        // Save file to storage
+        let lora_dir = format!("{}/{}", self.config.loras_dir, lora.name);
+        let file_path = format!("{}/{}", lora_dir, file_name);
+        self.storage.write(&file_path, content).await?;
+
+        // Update LoRA entity
+        lora.file_path = Some(file_path.clone());
+        lora.size_bytes = Some(file_size);
+        lora.updated_at = chrono::Utc::now().to_rfc3339();
+
+        // Update status to Available if it was Missing or Error
+        if lora.status == LoraStatus::Missing || lora.status == LoraStatus::Error {
+            lora.status = LoraStatus::Available;
+        }
+
+        // Update metadata
+        let meta_path = format!("{}/meta.toml", lora_dir);
+        let meta_toml = toml::to_string_pretty(&lora)
+            .map_err(|e| LoraError::InvalidMetadata(format!("Failed to serialize LoRA: {}", e)))?;
+        self.storage.write(&meta_path, meta_toml.as_bytes()).await?;
+
+        // Update in repository
+        self.repository.update(lora).await
     }
 }

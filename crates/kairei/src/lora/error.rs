@@ -25,6 +25,9 @@ pub enum LoraError {
 
     #[error("Conversion error: {0}")]
     ConversionError(String),
+
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, LoraError>;
