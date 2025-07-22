@@ -9,9 +9,7 @@ use kairei::chat::{ChatConfig, GenerationParams, ModelType};
 use kairei::lora::InMemoryLoraRepository;
 use kairei::storage::LocalStorage;
 use kairei::training_data::InMemoryTrainingDataRepository;
-use kairei_api::routes::v1::chat::{
-    CreateSessionRequest, CreateSessionResponse,
-};
+use kairei_api::routes::v1::chat::{CreateSessionRequest, CreateSessionResponse};
 use kairei_api::{AppState, build_app, config::AuthConfig};
 use std::sync::Arc;
 use tower::util::ServiceExt;

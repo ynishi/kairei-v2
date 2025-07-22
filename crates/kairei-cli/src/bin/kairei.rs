@@ -186,7 +186,67 @@ async fn main() -> Result<(), CliError> {
             tokenizer,
             max_tokens,
         }) => {
+            // Create services for Chat command
+            use kairei::base_model::{
+                BaseModelService, HuggingFaceDownloader, InMemoryBaseModelRepository,
+                PostgresBaseModelRepository,
+            };
+            use kairei::config::KaireiConfig;
+            use kairei::lora::{InMemoryLoraRepository, LoraService, PostgresLoraRepository};
+            use kairei::storage::LocalStorage;
+            use sqlx::postgres::PgPoolOptions;
+            use std::sync::Arc;
+
+            let config = KaireiConfig::default();
+
+            // Try to use PostgreSQL if DATABASE_URL is set, otherwise fall back to in-memory
+            let lora_repository: Arc<dyn kairei::lora::LoraRepository> =
+                if let Ok(database_url) = env::var("DATABASE_URL") {
+                    println!("📊 Connecting to database for LoRA...");
+                    let pool = PgPoolOptions::new()
+                        .max_connections(5)
+                        .connect(&database_url)
+                        .await
+                        .map_err(|e| {
+                            CliError::InvalidInput(format!("Failed to connect to database: {}", e))
+                        })?;
+                    Arc::new(PostgresLoraRepository::new(pool.clone()))
+                } else {
+                    println!("⚠️  No DATABASE_URL found, using in-memory LoRA repository");
+                    Arc::new(InMemoryLoraRepository::new())
+                };
+
+            let base_model_repository: Arc<dyn kairei::base_model::BaseModelRepository> =
+                if let Ok(database_url) = env::var("DATABASE_URL") {
+                    println!("📊 Connecting to database for BaseModel...");
+                    let pool = PgPoolOptions::new()
+                        .max_connections(5)
+                        .connect(&database_url)
+                        .await
+                        .map_err(|e| {
+                            CliError::InvalidInput(format!("Failed to connect to database: {}", e))
+                        })?;
+                    Arc::new(PostgresBaseModelRepository::new(pool))
+                } else {
+                    println!("⚠️  No DATABASE_URL found, using in-memory BaseModel repository");
+                    Arc::new(InMemoryBaseModelRepository::new())
+                };
+
+            let storage = Arc::new(LocalStorage::from_config(&config));
+            let lora_service =
+                LoraService::with_config(lora_repository, storage.clone(), config.clone());
+
+            let downloader = Arc::new(HuggingFaceDownloader::new(None));
+            let base_model_service = BaseModelService::with_config(
+                base_model_repository,
+                storage,
+                downloader,
+                config.clone(),
+            );
+
             commands::run_chat(
+                &lora_service,
+                &base_model_service,
                 message.clone(),
                 *once,
                 *candle,
